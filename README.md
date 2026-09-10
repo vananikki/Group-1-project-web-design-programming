@@ -61,6 +61,8 @@ Hệ thống thương mại điện tử trực tuyến cho phép người dùng
 ├── .gitignore
 ├── docker-compose.yml          # Triển khai FastAPI + PostgreSQL một lệnh
 └── README.md
+```
+---
 
 ## ✨ 4. Tính Năng Chi Tiết (Detailed Features & Technical Implementation)
 
