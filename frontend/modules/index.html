@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Judge</title>
+</head>
+
+<body>
+
+    <h1>Online Judge</h1>
+
+    <p id="account-name"></p>
+    <p id="account-code"></p>
+
+    <button id="logout-button">Đăng xuất</button>
+
+    <script>
+        async function loadAccount() {
+            try {
+                const response = await fetch(
+                    "http://localhost:8000/auth/me",
+                    {
+                        method: "GET",
+                        credentials: "include"
+                    }
+                );
+
+                if (!response.ok) {
+                    // Session không tồn tại / hết hạn
+                    window.location.replace("login.html");
+                    return;
+                }
+
+                const account = await response.json();
+
+                document.getElementById("account-name").textContent =
+                    `Xin chào, ${account.account_name}`;
+
+                document.getElementById("account-code").textContent =
+                    `Mã tài khoản: ${account.account_code}`;
+
+            } catch (error) {
+                console.error(error);
+                window.location.replace("login.html");
+            }
+        }
+
+        loadAccount();
+    </script>
+
+</body>
+</html>

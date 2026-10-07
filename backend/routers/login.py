@@ -62,7 +62,7 @@ def login_api(
     # 2. Tạo session ID ngẫu nhiên
     session_id = secrets.token_urlsafe(32)
 
-    # 3. Session có hiệu lực trong 7 ngày
+    # 3. Session có hiệu lực trong 1 ngày
     expires_at = datetime.now(timezone.utc) + timedelta(days=1)
 
     # 4. Lưu session vào database
@@ -95,3 +95,49 @@ def login_api(
     )
 
     return response
+
+
+@router.get("/me")
+def get_current_account(
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    if session_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Chưa đăng nhập",
+        )
+
+    user_session = session.scalar(
+        select(UserSession)
+        .where(UserSession.session_id == session_id)
+    )
+
+    if user_session is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Session không hợp lệ",
+        )
+
+    from datetime import datetime, timezone
+
+    if user_session.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=401,
+            detail="Session đã hết hạn",
+        )
+
+    account = session.get(Account, user_session.account_id)
+
+    if account is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Tài khoản không tồn tại",
+        )
+
+    return {
+        "account_id": account.account_id,
+        "account_name": account.account_name,
+        "account_code": account.account_code,
+        "role": account.role.value,
+    }
