@@ -1,135 +1,691 @@
-# 🛒 [Tên Dự Án] - E-Commerce Platform
+# Online Judge
 
-> **Môn học:** Web Design and Programming  
-> **Kiến trúc:** Client-Server decoupled (Vanilla Frontend + FastAPI Backend RESTful API)  
-> **Nhóm thực hiện:** Group 1   
-> **Giảng viên hướng dẫn:** [Tên giảng viên]
+A web-based Online Judge system for programming practice and programming contests.
 
----
+The system provides different levels of access for **students**, **admins**, and **super admins**. Students can solve problems and submit solutions, while admins manage programming content and contests. Super admins have higher-level control over the system and administrative accounts.
 
-## 📌 1. Giới Thiệu & Mục Tiêu Dự Án
-Hệ thống thương mại điện tử trực tuyến cho phép người dùng tìm kiếm, xem chi tiết, quản lý giỏ hàng và đặt mua sản phẩm. Ứng dụng xây dựng theo chuẩn kiến trúc Web hiện đại:
-- **Frontend độc lập:** Viết bằng HTML5 chuẩn ngữ nghĩa (Semantic & Accessibility), CSS3 Responsive (Grid/Flexbox) và Vanilla JS xử lý DOM/Async Fetch.
-- **Backend API:** FastAPI hiệu năng cao, quản lý quan hệ thực thể với SQLModel & PostgreSQL, tích hợp xác thực JWT, Dependency Injection và Auto-generated Swagger Docs.
+The project is designed as a modular backend application with a relational database and an external judging service powered by **Judge0**.
 
 ---
 
-## 🛠️ 2. Công Nghệ Sử Dụng (Tech Stack)
+## 1. System Overview
 
-| Tầng | Công nghệ / Thư viện | Ghi chú kỹ thuật |
-| :--- | :--- | :--- |
-| **Frontend** | HTML5, CSS3, JavaScript (ES6+) | Semantic tags, ARIA attributes, Flexbox/Grid, Responsive Mobile-first, DOM API, Fetch API / AJAX |
-| **Backend** | Python 3.11+, FastAPI, Uvicorn | Pydantic validation, FastAPI Routing, Middlewares, Dependency Injection |
-| **Database & ORM** | PostgreSQL, SQLModel | Data Modeling, Foreign Keys, Relationships, Migrations (Alembic) |
-| **Auth & Security** | Passlib (Bcrypt), PyJWT, OAuth2PasswordBearer | Hashing mật khẩu, JWT Token, Role-based Access (Customer/Admin), Session Middleware |
-| **Testing & Docs** | Pytest, HTTPX, FastAPI TestClient, Swagger UI | REST API auto-docs (`/docs`), Unit Test & Integration Test |
-| **Deployment** | Docker, Uvicorn, Render / Railway / Docker Compose | Môi trường container hóa phục vụ Production |
-
----
-
-## 📂 3. Cấu Trúc Thư Mục (Project Architecture)
+The system consists of three main parts:
 
 ```text
-├── frontend/                   # Frontend tĩnh (HTML5, CSS3, Vanilla JS)
-│   ├── index.html              # Trang chủ & danh sách sản phẩm
-│   ├── product-detail.html     # Chi tiết sản phẩm & đánh giá
-│   ├── cart.html               # Giỏ hàng & thanh toán
-│   ├── admin.html              # Trang quản trị sản phẩm & đơn hàng
-│   ├── css/
-│   │   ├── base.css            # Reset, biến CSS, typography
-│   │   ├── layout.css          # Grid, Flexbox, Responsive rules
-│   │   └── components.css      # Card, button, modal, form
-│   └── js/
-│       ├── api.js              # Wrapper hàm fetch() gọi Backend REST API
-│       ├── auth.js             # Quản lý token, trạng thái đăng nhập
-│       ├── app.js              # Xử lý DOM, render dữ liệu, event listeners
-│       └── cart.js             # Quản lý state giỏ hàng (LocalStorage + API sync)
-│
-├── backend/                    # FastAPI Backend Service
-│   ├── app/
-│   │   ├── core/               # Cấu hình môi trường, bảo mật (security.py, config.py)
-│   │   ├── db/                 # Kết nối DB engine, session factory (database.py)
-│   │   ├── models/             # SQLModel schemas (User, Product, Order, OrderItem)
-│   │   ├── routers/            # API Endpoints chia module (auth, products, orders)
-│   │   ├── middlewares/        # Custom logging, CORS, session middlewares
-│   │   ├── dependencies/       # Dependency Injection (get_db, get_current_user)
-│   │   └── main.py             # Entrypoint FastAPI app
-│   ├── tests/                  # Kiểm thử tự động (pytest, test_client)
-│   ├── requirements.txt        # Thư viện Python
-│   └── Dockerfile              # Containerize Backend
-│
-├── .gitignore
-├── docker-compose.yml          # Triển khai FastAPI + PostgreSQL một lệnh
-└── README.md
+┌───────────────┐
+│    Student    │
+└───────┬───────┘
+        │
+        │ Submit code / View results
+        ▼
+┌───────────────────────┐
+│       FastAPI         │
+│       Backend         │
+└──────────┬────────────┘
+           │
+     ┌─────┴─────┐
+     │           │
+     ▼           ▼
+┌──────────┐  ┌──────────┐
+│PostgreSQL│  │  Judge0  │
+│ Database │  │  Service │
+└──────────┘  └────┬─────┘
+                   │
+                   ▼
+             Compile & Run
+                   │
+                   ▼
+             Judge Result
 ```
----
 
-## ✨ 4. Tính Năng Chi Tiết (Detailed Features & Technical Implementation)
+The backend is responsible for authentication, authorization, problem management, submissions, contests, and communication with the database.
 
-Hệ thống được thiết kế theo kiến trúc Client-Server tách rời, bám sát các chuẩn kỹ thuật trong chương trình môn học:
-
-### 4.1. Phía Khách Hàng (Customer Experience)
-
-* **Semantic UI & Accessibility (HTML5/CSS3 - Tuần 2 & 3):**
-  * Giao diện bố cục chuẩn Semantic Web: `<header>`, `<nav>`, `<main>`, `<section>`, `<article>`, `<aside>`, `<footer>`.
-  * Hỗ trợ Accessibility (A11y): Thuộc tính `aria-label`, `aria-expanded`, thẻ `label` liên kết chặt chẽ với `input`, văn bản thay thế `alt` cho toàn bộ hình ảnh sản phẩm.
-  * Thiết kế Responsive: Hệ thống Layout sử dụng CSS Grid (danh mục, lưới sản phẩm) và Flexbox (thanh điều hướng, thẻ sản phẩm, footer), tối ưu hiển thị mượt mà trên Mobile, Tablet và Desktop.
-
-* **Khám phá Sản phẩm & Tải bất đồng bộ (DOM & Fetch/AJAX - Tuần 4 & 5):**
-  * **Render dữ liệu động:** Sử dụng JavaScript DOM API để khởi tạo và cập nhật danh sách thẻ sản phẩm (Card) từ dữ liệu API.
-  * **Bộ lọc không tải lại trang (Single-Page Experience):** Lọc theo khoảng giá, phân loại danh mục và sắp xếp (giá tăng/giảm, mới nhất) thông qua `fetch()` bất đồng bộ (`async/await`), hiển thị trạng thái Loading Skeleton trong lúc chờ phản hồi.
-  * **Tìm kiếm Real-time (Debounce Search):** Kỹ thuật trì hoãn gửi request khi người dùng nhập từ khóa tìm kiếm, giảm tải số lượng query đến Backend.
-
-* **Giỏ Hàng & Đặt Hàng (Cart & Checkout Flow):**
-  * **Quản lý trạng thái giỏ hàng (Cart State):** Lưu trữ giỏ hàng tạm thời ở `LocalStorage` đối với khách vãng lai và đồng bộ tự động với Database sau khi đăng nhập.
-  * **Tương tác trực quan:** Tăng/giảm số lượng sản phẩm, tự động tính toán tổng tiền, VAT và phí giao hàng trực tiếp trên giao diện.
-  * **Xác thực biểu mẫu (Client-side Validation):** Kiểm tra tính hợp lệ của số điện thoại, email, địa chỉ nhận hàng bằng Regex và Event Listener trước khi gửi đơn.
-
-* **Tài khoản & Lịch sử Đơn hàng:**
-  * Xem trạng thái các đơn hàng cá nhân (Chờ xử lý, Đang giao, Hoàn tất, Đã hủy).
-  * Chi tiết hóa đơn: Danh sách mặt hàng, số tiền, ngày tạo đơn và địa chỉ nhận hàng.
+**Judge0** is responsible for compiling and executing submitted source code and returning the execution result to the backend.
 
 ---
 
-### 4.2. Phía Quản Trị Viên (Admin Management)
+# 2. User Roles
 
-* **Bảng điều khiển & Thống kê (Dashboard Analytics):**
-  * Thống kê tổng doanh thu, số lượng đơn hàng mới, số lượng khách hàng đăng ký và cảnh báo mặt hàng sắp hết hàng trong kho.
-* **Quản lý Danh mục & Sản phẩm (Product CRUD):**
-  * Thêm mới sản phẩm có đính kèm ảnh đại diện (hỗ trợ Image URL hoặc tải file qua `UploadFile` của FastAPI).
-  * Chỉnh sửa thông tin, cập nhật giá bán, số lượng tồn kho (Inventory tracking).
-  * Xóa/vô hiệu hóa hiển thị sản phẩm (Soft Delete).
-* **Quản lý Đơn hàng (Order Processing):**
-  * Xem danh sách đơn hàng toàn hệ thống với bộ lọc trạng thái.
-  * Cập nhật tiến độ đơn hàng theo chu trình: `Pending` ➔ `Confirmed` ➔ `Shipping` ➔ `Completed` / `Cancelled`.
+The system has three main roles.
+
+## Student
+
+Students are regular users of the Online Judge.
+
+They can:
+
+- Register and log in
+- View available problems
+- View problem details
+- Submit solutions
+- View their submissions
+- View judging results
+- Participate in contests
+- View contest standings
+
+Students cannot modify problems, test cases, contests, or other users.
 
 ---
 
-### 4.3. Kiến Trúc Backend & Kỹ Thuật Hệ Thống (Backend Architecture)
+## Admin
 
-* **RESTful API & Routing (FastAPI - Tuần 6 & 7):**
-  * Phân chia Router mô-đun hóa: `/api/v1/auth`, `/api/v1/products`, `/api/v1/categories`, `/api/v1/orders`.
-  * Chuẩn hóa Request/Response thông qua Pydantic Schemas (`UserCreate`, `ProductRead`, `OrderResponse`), tự động kiểm tra kiểu dữ liệu và sinh mã lỗi chuẩn 422 Unprocessable Entity.
+Admins are responsible for managing programming content and contests.
 
-* **Middlewares & Context (Tuần 8):**
-  * **CORS Middleware:** Cấu hình nguồn gốc hợp lệ (`allow_origins`), method và headers để Frontend giao tiếp an toàn với API.
-  * **Process Time Middleware:** Gắn header `X-Process-Time` vào mọi response để theo dõi hiệu năng xử lý request của server.
-  * **Exception Handling Middleware:** Bắt và chuẩn hóa các ngoại lệ nội bộ (500) thành thông báo JSON thân thiện với Client.
+They can:
 
-* **Cơ sở Dữ liệu & Mô hình Quan hệ (PostgreSQL + SQLModel - Tuần 9):**
-  * Thiết kế bảng quan hệ chặt chẽ:
-    * `User` (1) ── (N) `Order`
-    * `Category` (1) ── (N) `Product`
-    * `Order` (N) ── (M) `Product` (thông qua bảng liên kết `OrderItem`).
-  * Khóa ngoại (`foreign_key`), kiểm tra ràng buộc (Constraint) và xử lý Transaction khi tạo đơn: Đảm bảo số lượng hàng tồn kho được trừ đồng thời với việc tạo `Order` và `OrderItem`.
+- Create and edit problems
+- Manage problem test cases
+- Publish or unpublish problems
+- Create and manage contests
+- Manage contest problems
+- View submissions related to their managed content
+- Monitor contest results
 
-* **Xác thực, Phân quyền & Bảo mật (Auth & Security - Tuần 11):**
-  * Băm mật khẩu một chiều an toàn bằng thuật toán `bcrypt` (`passlib`).
-  * Cơ chế cấp phát và giải mã **JWT Token (JSON Web Token)** với thời gian hết hạn (`exp`).
-  * **Dependency Injection & RBAC:**
-    * `get_current_user`: Dependency trích xuất và xác thực Token từ Header `Authorization: Bearer <token>`.
-    * `require_admin_role`: Dependency chặn truy cập trái phép vào các endpoint CRUD sản phẩm và quản lý đơn hàng.
+Admins cannot manage the highest-level system configuration or super admin accounts.
 
-* **Kiểm Thử & Tài liệu API (Testing & Auto-docs - Tuần 10):**
-  * Tài liệu tương tác tự động chuẩn OpenAPI tại `/docs` (Swagger UI) và `/redoc`.
-  * Bộ test tự động viết bằng `pytest` và `httpx.AsyncClient` kiểm thử các luồng quan trọng: Đăng ký/Đăng nhập, Tạo sản phẩm và Quy trình đặt hàng.
+---
+
+## Super Admin
+
+Super admins have the highest level of privileges.
+
+In addition to admin capabilities, they can:
+
+- Manage admin accounts
+- Manage user accounts
+- Assign or change user roles
+- Manage system-level configuration
+- Access administrative functions across the entire system
+
+The super admin role is intended for system-level administration rather than everyday problem management.
+
+---
+
+# 3. Main Application Flow
+
+## 3.1 Authentication Flow
+
+```text
+User
+ │
+ │ Email + Password
+ ▼
+FastAPI
+ │
+ ├── Find account
+ │
+ ├── Verify password
+ │
+ └── Create session
+ │
+ ▼
+Authenticated User
+```
+
+The system uses the user's **email address as the login identifier**.
+
+The `account_name` field is used as the user's display name and is not used for authentication.
+
+Passwords are hashed before being stored in the database.
+
+---
+
+# 4. Student Flow
+
+A typical student workflow is:
+
+```text
+Register / Login
+       │
+       ▼
+Browse Problems
+       │
+       ▼
+Select Problem
+       │
+       ▼
+Read Statement
+       │
+       ▼
+Write Solution
+       │
+       ▼
+Submit Code
+       │
+       ▼
+Create Submission
+       │
+       ▼
+Send to Judge0
+       │
+       ▼
+Judge0 Compiles & Executes
+       │
+       ▼
+Receive Result
+       │
+       ▼
+Store Submission Result
+       │
+       ▼
+Student Views Result
+```
+
+For example, when a student submits a C++ solution:
+
+1. The backend receives the source code.
+2. A `Submission` record is created.
+3. The backend sends the source code and required parameters to Judge0.
+4. Judge0 compiles and executes the program.
+5. Judge0 returns the execution result.
+6. The backend updates the corresponding `Submission`.
+7. The student can view the result.
+
+---
+
+# 5. Admin Flow
+
+The admin is mainly responsible for creating and maintaining programming content.
+
+### Problem Management
+
+```text
+Admin Login
+    │
+    ▼
+Create Problem
+    │
+    ├── Problem Statement
+    ├── Constraints
+    ├── Time Limit
+    ├── Memory Limit
+    └── Test Cases
+    │
+    ▼
+Publish Problem
+    │
+    ▼
+Students Can Submit
+```
+
+An admin can modify a problem before it is published and manage its associated test cases.
+
+### Contest Management
+
+```text
+Admin
+  │
+  ▼
+Create Contest
+  │
+  ├── Contest Information
+  ├── Start / End Time
+  └── Select Problems
+  │
+  ▼
+Publish Contest
+  │
+  ▼
+Students Participate
+  │
+  ▼
+Submissions
+  │
+  ▼
+Contest Results / Standings
+```
+
+---
+
+# 6. Super Admin Flow
+
+The super admin operates at the system level.
+
+```text
+Super Admin
+     │
+     ├───────────────┐
+     ▼               ▼
+Manage Users      Manage Admins
+     │               │
+     ├── View        ├── Create
+     ├── Disable     ├── Disable
+     └── Change Role └── Manage Role
+```
+
+The separation between `admin` and `super_admin` prevents normal content administrators from obtaining system-level privileges.
+
+---
+
+# 7. Database Design
+
+The database is designed around several main entities.
+
+```text
+Account
+   │
+   ├────────── Session
+   │
+   └────────── Submission
+                    │
+                    ▼
+                  Problem
+                    │
+                    ▼
+                 TestCase
+
+Contest
+   │
+   ├────────── Problem
+   │
+   └────────── ContestParticipation
+```
+
+The exact schema may evolve as the project develops.
+
+---
+
+## 7.1 Account
+
+Represents a user of the system.
+
+Main information includes:
+
+```text
+Account
+---------
+account_id
+account_email
+account_name
+password_hash
+role
+created_at
+```
+
+`account_email` is unique and is used for authentication.
+
+`account_name` is the display name shown to other users.
+
+The `role` determines the user's permissions:
+
+```text
+STUDENT
+ADMIN
+SUPER_ADMIN
+```
+
+---
+
+## 7.2 Session
+
+A `Session` represents an authenticated login session.
+
+```text
+Session
+---------
+session_id
+account_id
+created_at
+expires_at
+```
+
+Relationship:
+
+```text
+Account 1 ──────── N Session
+```
+
+One account can have multiple sessions, for example when the user logs in from multiple devices.
+
+---
+
+## 7.3 Problem
+
+Represents a programming problem.
+
+```text
+Problem
+---------
+problem_id
+title
+statement
+time_limit
+memory_limit
+created_at
+updated_at
+...
+```
+
+A problem may be created and managed by an admin.
+
+A problem contains multiple test cases.
+
+```text
+Problem 1 ──────── N TestCase
+```
+
+---
+
+## 7.4 TestCase
+
+Represents an input/output test case for a problem.
+
+```text
+TestCase
+---------
+testcase_id
+problem_id
+input_data
+expected_output
+```
+
+Test cases are used by the judging system to determine whether a submitted program produces the expected result.
+
+---
+
+## 7.5 Submission
+
+A `Submission` represents one attempt by a student to solve a problem.
+
+```text
+Submission
+------------
+submission_id
+account_id
+problem_id
+source_code
+language
+status
+score
+created_at
+...
+```
+
+Relationships:
+
+```text
+Account  1 ──────── N Submission
+Problem  1 ──────── N Submission
+```
+
+Therefore:
+
+```text
+Student
+   │
+   ├── Submission 1 ── Problem A
+   ├── Submission 2 ── Problem B
+   └── Submission 3 ── Problem A
+```
+
+A student can submit multiple times for the same problem.
+
+---
+
+# 8. Contest
+
+A contest represents a programming competition.
+
+```text
+Contest
+---------
+contest_id
+title
+description
+start_time
+end_time
+created_by
+```
+
+A contest contains multiple problems, while a problem may potentially appear in multiple contests.
+
+Therefore, the relationship is conceptually:
+
+```text
+Contest N ──────── N Problem
+```
+
+This can be implemented using an association table such as:
+
+```text
+ContestProblem
+---------------
+contest_id
+problem_id
+```
+
+---
+
+# 9. Contest Participation
+
+The system can track which students participate in a contest.
+
+```text
+ContestParticipation
+---------------------
+contest_id
+account_id
+registered_at
+```
+
+Relationship:
+
+```text
+Account N ──────── N Contest
+```
+
+This allows the system to maintain information about contest participants and generate standings.
+
+---
+
+# 10. Submission and Judge0
+
+The Online Judge does not directly compile and execute source code itself.
+
+Instead, it uses **Judge0** as the execution and judging service.
+
+The flow is:
+
+```text
+             Backend
+                │
+                │ Source Code
+                │ Language
+                │ Input
+                ▼
+             Judge0
+                │
+         ┌──────┴──────┐
+         │             │
+      Compile        Execute
+         │             │
+         └──────┬──────┘
+                │
+                ▼
+           Judge Result
+                │
+                ▼
+             Backend
+                │
+                ▼
+            Submission
+```
+
+The backend sends the necessary information to Judge0, such as:
+
+- Source code
+- Programming language
+- Standard input
+- Time limit
+- Memory limit
+
+Judge0 returns information such as:
+
+- Compilation result
+- Program output
+- Standard error
+- Execution time
+- Memory usage
+- Status
+
+The backend then converts the result into the corresponding submission status and stores it in the database.
+
+---
+
+# 11. Submission Lifecycle
+
+A submission can be viewed as moving through several states:
+
+```text
+Created
+   │
+   ▼
+Queued
+   │
+   ▼
+Sent to Judge0
+   │
+   ▼
+Running
+   │
+   ├───────────────┐
+   ▼               ▼
+Accepted        Failed
+                   │
+          ┌────────┼─────────┐
+          ▼        ▼         ▼
+       Wrong     Runtime   Compile
+       Answer     Error     Error
+```
+
+The exact status model can be extended depending on the requirements of the judging system.
+
+---
+
+# 12. Application Architecture
+
+The backend follows a layered structure to separate different responsibilities.
+
+```text
+Request
+   │
+   ▼
+Router / API
+   │
+   ▼
+Service
+   │
+   ├── Authentication
+   ├── Problem Management
+   ├── Submission
+   └── Contest Management
+   │
+   ▼
+SQLAlchemy Models
+   │
+   ▼
+PostgreSQL
+```
+
+The main responsibilities are separated as follows:
+
+### Models
+
+Define database entities and relationships.
+
+Examples:
+
+```text
+Account
+Session
+Problem
+TestCase
+Submission
+Contest
+ContestParticipation
+```
+
+### Schemas
+
+Define the data exchanged through the API.
+
+They are used to validate incoming requests and structure outgoing responses.
+
+### Routers
+
+Define API endpoints and handle HTTP requests.
+
+For example:
+
+```text
+/auth
+/problems
+/submissions
+/contests
+/admin
+```
+
+### Services
+
+Contain application logic that should not be tightly coupled to HTTP endpoints.
+
+Examples:
+
+```text
+authenticate()
+create_problem()
+submit_solution()
+judge_submission()
+create_contest()
+```
+
+### Database Layer
+
+Responsible for creating database sessions and communicating with PostgreSQL through SQLAlchemy.
+
+---
+
+# 13. High-Level Project Architecture
+
+```text
+                    ┌─────────────────┐
+                    │     Client      │
+                    │  Web Interface  │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │     FastAPI     │
+                    │     Routers     │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │    Services     │
+                    └──────┬─────┬────┘
+                           │     │
+                ┌──────────┘     └──────────┐
+                ▼                           ▼
+       ┌─────────────────┐         ┌─────────────────┐
+       │   PostgreSQL    │         │     Judge0      │
+       │     Database    │         │ Judge Service   │
+       └─────────────────┘         └─────────────────┘
+```
+
+The application backend acts as the central component connecting users, persistent data, and the external judging service.
+
+---
+
+# 14. Project Goals
+
+The main goals of the project are:
+
+- Build a functional Online Judge system.
+- Practice backend development with FastAPI.
+- Design a relational database for a real-world application.
+- Implement authentication and role-based authorization.
+- Understand relationships between users, problems, submissions, and contests.
+- Integrate an external code execution service using Judge0.
+- Develop a system that can later be extended with a dedicated frontend and more advanced contest features.
+
+The project is primarily intended as an educational and software engineering project, with the architecture designed to remain simple enough to understand while allowing future expansion.
