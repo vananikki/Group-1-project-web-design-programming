@@ -43,6 +43,19 @@ The backend is responsible for authentication, authorization, problem management
 
 **Judge0** is responsible for compiling and executing submitted source code and returning the execution result to the backend.
 
+## Local frontend/backend development
+
+The FastAPI backend allows credentialed requests from `http://100.73.218.40:5500`,
+`http://localhost:5500`, and `http://127.0.0.1:5500` by default. If the frontend is
+served from another origin, set `CORS_ORIGINS` in the backend environment to a
+comma-separated list of exact origins, including the scheme and port (for example,
+`http://localhost:3000,http://192.168.1.10:5500`).
+
+Before using authentication with a new database, create the schema from the
+`backend` directory with `.venv/bin/python -m db.initialize_tables`. Start the
+backend afterward, then create an account with `POST /auth/register` before
+signing in at the frontend.
+
 ---
 
 # 2. User Roles

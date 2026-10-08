@@ -5,14 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Online Judge</title>
 </head>
-
 <body>
 
 <script>
     async function checkSession() {
         try {
             const response = await fetch(
-                "http://localhost:8000/auth/me",
+                "http://100.73.218.40:8000/auth/me",
                 {
                     method: "GET",
                     credentials: "include"
@@ -20,10 +19,8 @@
             );
 
             if (response.ok) {
-                // Đã đăng nhập
                 window.location.replace("modules/index.html");
             } else {
-                // Chưa đăng nhập
                 window.location.replace("modules/login.html");
             }
 

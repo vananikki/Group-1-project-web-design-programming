@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -46,6 +48,7 @@ def create_account(
         account_name=name,
         account_email=email,
         role=AccountRole.USER,
+        account_code=f"PENDING{secrets.token_hex(6)}",
         password_hash="",  # tạm thời, sẽ được set bên dưới
     )
 
@@ -64,9 +67,11 @@ def create_account(
 
     except IntegrityError:
         session.rollback()
-        raise AccountExistsError(
-            "Email đã được sử dụng"
-        )
+        if session.scalar(
+            select(Account).where(Account.account_email == email)
+        ) is not None:
+            raise AccountExistsError("Email đã được sử dụng")
+        raise
 
     # Nạp lại dữ liệu từ DB
     session.refresh(acc)
