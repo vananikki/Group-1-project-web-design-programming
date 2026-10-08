@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Judge</title>
+</head>
+<body>
+
+    <h1>Online Judge</h1>
+
+    <p id="account-name"></p>
+    <p id="account-code"></p>
+
+    <button id="logout-button">Đăng xuất</button>
+    <p id="logout-error" role="alert"></p>
+
+    <script>
+        const logoutButton = document.getElementById("logout-button");
+        const logoutError = document.getElementById("logout-error");
+
+        async function loadAccount() {
+            try {
+                const response = await fetch(
+                    "http://100.73.218.40:8000/auth/me",
+                    {
+                        method: "GET",
+                        credentials: "include"
+                    }
+                );
+
+                if (!response.ok) {
+                    window.location.replace("login.html");
+                    return;
+                }
+
+                const account = await response.json();
+
+                document.getElementById("account-name").textContent =
+                    `Xin chào, ${account.account_name}`;
+
+                document.getElementById("account-code").textContent =
+                    `Mã tài khoản: ${account.account_code}`;
+
+            } catch (error) {
+                console.error(error);
+                window.location.replace("login.html");
+            }
+        }
+
+        logoutButton.addEventListener("click", async () => {
+            logoutError.textContent = "";
+            logoutButton.disabled = true;
+
+            try {
+                const response = await fetch(
+                    "http://100.73.218.40:8000/auth/logout",
+                    {
+                        method: "POST",
+                        credentials: "include"
+                    }
+                );
+
+                if (!response.ok) {
+                    logoutError.textContent = `Không thể đăng xuất (${response.status})`;
+                    logoutButton.disabled = false;
+                    return;
+                }
+
+                window.location.replace("login.html");
+            } catch (error) {
+                console.error(error);
+                logoutError.textContent = "Không thể kết nối đến server";
+                logoutButton.disabled = false;
+            }
+        });
+
+        loadAccount();
+    </script>
+
+</body>
+</html>

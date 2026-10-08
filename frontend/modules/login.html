@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập</title>
+</head>
+<body>
+    <h1>Đăng nhập</h1>
+
+    <form id="login-form">
+        <div>
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+
+        <div>
+            <label for="password">Mật khẩu</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+
+        <button type="submit">Đăng nhập</button>
+    </form>
+
+    <p id="error-message"></p>
+
+    <script>
+        const form = document.getElementById("login-form");
+        const errorMessage = document.getElementById("error-message");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+
+            errorMessage.textContent = "";
+
+            try {
+                const response = await fetch(
+                    "http://100.73.218.40:8000/auth/login",
+                    {
+                        method: "POST",
+                        credentials: "include",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            account_email: email,
+                            password: password
+                        })
+                    }
+                );
+
+                if (response.ok) {
+                    window.location.replace("../index.html");
+                    return;
+                }
+
+                if (response.headers.get("content-type")?.includes("application/json")) {
+                    const data = await response.json();
+                    errorMessage.textContent =
+                        data.detail || `Server error (${response.status})`;
+                } else {
+                    errorMessage.textContent = `Server error (${response.status})`;
+                }
+
+            } catch (error) {
+                console.error(error);
+                errorMessage.textContent =
+                    "Không thể kết nối đến server";
+            }
+        });
+    </script>
+</body>
+</html>
