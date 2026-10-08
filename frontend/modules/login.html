@@ -28,6 +28,24 @@
         const form = document.getElementById("login-form");
         const errorMessage = document.getElementById("error-message");
 
+        async function redirectIfLoggedIn() {
+            try {
+                const response = await fetch(
+                    "http://100.73.218.40:8000/auth/me",
+                    {
+                        method: "GET",
+                        credentials: "include"
+                    }
+                );
+
+                if (response.ok) {
+                    window.location.replace("index.html");
+                }
+            } catch (error) {
+                console.error("Could not check the current session:", error);
+            }
+        }
+
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
 
@@ -71,6 +89,8 @@
                     "Không thể kết nối đến server";
             }
         });
+
+        redirectIfLoggedIn();
     </script>
 </body>
 </html>

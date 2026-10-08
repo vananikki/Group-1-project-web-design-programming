@@ -36,33 +36,6 @@ def home():
 
 
 
-@app.get("/create-table")
-def create_table():
-    with engine.connect() as connection:
-        connection.execute(text("""
-            CREATE TABLE test_users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(100),
-                email VARCHAR(100)
-        """))
-        connection.commit()
-
-    return {
-        "message": "Table test_users created successfully!"
-    }
-
-
-@app.get("/delete-table")
-def delete_table():
-    with engine.connect() as connection:
-        connection.execute(text("DROP TABLE test_users"))
-        connection.commit()
-
-    return {
-        "message": "Table test_users deleted successfully!"
-    }
-
-
 app = CORSMiddleware(
     app,
     allow_origins=CORS_ORIGINS,
