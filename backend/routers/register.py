@@ -31,6 +31,12 @@ def create_account(
     name = name.strip()
     email = email.strip().lower()
 
+    if len(name) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Tên tài khoản phải có ít nhất 3 ký tự",
+        )
+
     # Kiểm tra email đã tồn tại chưa
     existed = session.scalar(
         select(Account).where(
