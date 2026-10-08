@@ -35,6 +35,7 @@ def home():
     return {"message": "Hello Online Judge! This is the backend server for the Online Judge system."}
 
 
+
 @app.get("/create-table")
 def create_table():
     with engine.connect() as connection:
