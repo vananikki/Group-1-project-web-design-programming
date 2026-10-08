@@ -11,6 +11,7 @@
 
     <p id="account-name"></p>
     <p id="account-code"></p>
+    <a id="manage-accounts-link" href="manage_accounts.html" hidden>Quản lý tài khoản</a>
 
     <button id="logout-button">Đăng xuất</button>
     <p id="logout-error" role="alert"></p>
@@ -41,6 +42,8 @@
 
                 document.getElementById("account-code").textContent =
                     `Mã tài khoản: ${account.account_code}`;
+                document.getElementById("manage-accounts-link").hidden =
+                    account.role !== "SUPER_ADMIN";
 
             } catch (error) {
                 console.error(error);

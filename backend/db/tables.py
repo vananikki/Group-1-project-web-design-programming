@@ -6,6 +6,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum as SAEnum,
     ForeignKey,
@@ -196,6 +197,13 @@ class Admin(Base):
     account_id: Mapped[int] = mapped_column(
         ForeignKey("account.account_id"),
         unique=True,
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
         nullable=False,
     )
 

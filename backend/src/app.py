@@ -6,6 +6,7 @@ import os
 
 from routers.login import router as auth_router
 from routers.logout import router as logout_router
+from routers.manage_accounts import router as manage_accounts_router
 from routers.register import router as register_router
 
 
@@ -27,6 +28,7 @@ app = FastAPI()
 
 app.include_router(auth_router)
 app.include_router(logout_router)
+app.include_router(manage_accounts_router)
 app.include_router(register_router)
 
 

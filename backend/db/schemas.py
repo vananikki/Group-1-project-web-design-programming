@@ -8,6 +8,8 @@ from pydantic import (
     field_validator,
 )
 
+from db.tables import AccountRole
+
 
 # =========================================================
 # Register
@@ -38,6 +40,10 @@ class LoginIn(BaseModel):
         min_length=1,
         max_length=128,
     )
+
+
+class AccountRoleUpdateIn(BaseModel):
+    role: AccountRole
 
 
 # =========================================================

@@ -52,9 +52,49 @@ comma-separated list of exact origins, including the scheme and port (for exampl
 `http://localhost:3000,http://192.168.1.10:5500`).
 
 Before using authentication with a new database, create the schema from the
-`backend` directory with `.venv/bin/python -m db.initialize_tables`. Start the
-backend afterward, then create an account with `POST /auth/register` before
-signing in at the frontend.
+`backend` directory with `.venv/bin/python -m db.initialize_tables`, then start
+the backend. Open the frontend through a local web server (for example,
+`http://100.73.218.40:5500`) rather than as a `file://` URL. Create an account
+from the registration page before signing in.
+
+For an existing database, apply the admin-status migration from the `backend`
+directory with `.venv/bin/python -m db.migrate_admin_active` before restarting
+the backend. This adds `admin.is_active` and synchronizes admin records with
+accounts whose role is `ADMIN` or `SUPER_ADMIN`.
+
+### Authentication pages and API
+
+- `frontend/modules/login.html` is the login page. It checks the current session
+  when opened and redirects an already signed-in user to the account page.
+- `frontend/modules/register.html` creates an account using a display name,
+  email address, and password. The password must be at least 8 characters; the
+  display name must be at least 3 characters. The form asks the user to confirm
+  the password before submitting.
+- `frontend/modules/index.html` displays the signed-in account, provides the
+  logout button, and links super admins to account management.
+- `frontend/modules/manage_accounts.html` lists accounts and lets super admins
+  change account roles and see whether admin mode is active. Users without a
+  session are redirected to login; signed-in users without the super-admin role
+  are returned to the account page.
+
+The frontend uses these FastAPI endpoints:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/auth/register` | Create an account; returns `409` if the email is already registered. |
+| `POST` | `/auth/login` | Verify email and password, then set the `session_id` cookie. |
+| `GET` | `/auth/me` | Return the current account when the session is valid; otherwise returns `401`. |
+| `POST` | `/auth/logout` | Delete the current server-side session and clear the `session_id` cookie. |
+| `GET` | `/admin/accounts` | List accounts; requires a valid super-admin session. |
+| `PATCH` | `/admin/accounts/{account_id}/role` | Change an account role to `USER`, `ADMIN`, or `SUPER_ADMIN`; requires a valid super-admin session. |
+
+Authentication uses an HTTP-only session cookie. Frontend API requests include
+credentials so the browser sends and receives that cookie. Logging out invalidates
+the session immediately; opening the login page while the session is still valid
+redirects back to the account page. The account-management API also prevents a super admin from demoting their own
+account or removing the last super admin. Promoting an account to `ADMIN` or
+`SUPER_ADMIN` creates or activates its `admin` row; demoting it marks that row
+inactive without deleting its admin record or class assignments.
 
 ---
 
