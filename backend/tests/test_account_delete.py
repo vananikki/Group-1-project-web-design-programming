@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -110,6 +111,21 @@ def test_register_rejects_weak_password():
 
     assert response.status_code == 422
     assert "Mật khẩu phải" in response.json()["detail"][0]["msg"] or "Mật khẩu phải" in response.text
+
+
+def test_resend_verification_code_allows_30_seconds_between_requests():
+    email = "cooldown@example.com"
+    auth_router._VERIFICATION_CODES.clear()
+
+    first_sent = datetime.now(timezone.utc)
+    auth_router._VERIFICATION_CODES[email] = {
+        "code": "123456",
+        "sent_at": first_sent,
+        "expires_at": first_sent + timedelta(minutes=5),
+    }
+
+    with pytest.raises(RuntimeError, match="30 giây"):
+        auth_router._store_verification_code(email)
 
 
 def test_forgot_password_flow(monkeypatch):

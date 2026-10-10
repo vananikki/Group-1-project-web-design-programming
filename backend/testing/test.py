@@ -1,8 +1,10 @@
 
 import os
 import base64
+from pathlib import Path
 
 from dotenv import load_dotenv
+from google.auth.exceptions import RefreshError
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -11,7 +13,8 @@ from googleapiclient.errors import HttpError
 from email.mime.text import MIMEText
 
 
-load_dotenv()
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_ROOT / ".env")
 
 CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH")
 TOKEN_PATH = os.getenv("GOOGLE_TOKEN_PATH", "token.json")
@@ -42,9 +45,14 @@ if os.path.exists(TOKEN_PATH):
         SCOPES,
     )
 
-# Token hết hạn thì tự làm mới
+# Token hết hạn thì tự làm mới; nếu refresh token đã invalid/expired thì bắt đầu lại OAuth
 if credentials and credentials.expired and credentials.refresh_token:
-    credentials.refresh(Request())
+    try:
+        credentials.refresh(Request())
+    except RefreshError:
+        credentials = None
+        if os.path.exists(TOKEN_PATH):
+            os.remove(TOKEN_PATH)
 
 # Chỉ yêu cầu chọn tài khoản nếu chưa có credentials hợp lệ
 if not credentials or not credentials.valid:

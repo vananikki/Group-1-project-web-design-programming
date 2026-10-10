@@ -1,11 +1,13 @@
 import base64
 import os
 import secrets
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -20,7 +22,8 @@ from db.session import get_session
 from db.tables import Account
 
 
-load_dotenv()
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_ROOT / ".env")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -32,7 +35,7 @@ GOOGLE_TOKEN_PATH = os.getenv(
 )
 
 OTP_TTL_SECONDS = 5 * 60
-OTP_RESEND_SECONDS = 5 * 60
+OTP_RESEND_SECONDS = 30
 _VERIFICATION_CODES: dict[str, dict[str, str | datetime]] = {}
 _GMAIL_SERVICE = None
 
@@ -73,13 +76,17 @@ def _build_gmail_service():
     credentials: Credentials | None = None
 
     if os.path.exists(GOOGLE_TOKEN_PATH):
-        credentials = Credentials.from_authorized_user_file(
-            GOOGLE_TOKEN_PATH,
-            SCOPES,
-        )
-
-    if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials = Credentials.from_authorized_user_file(
+                GOOGLE_TOKEN_PATH,
+                SCOPES,
+            )
+            if credentials and credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+        except RefreshError:
+            credentials = None
+            if os.path.exists(GOOGLE_TOKEN_PATH):
+                os.remove(GOOGLE_TOKEN_PATH)
 
     if not credentials or not credentials.valid:
         flow = InstalledAppFlow.from_client_secrets_file(
@@ -140,7 +147,7 @@ def _store_verification_code(email: str) -> str:
     if payload is not None:
         last_sent = datetime.fromisoformat(str(payload["sent_at"]))
         if (now - last_sent).total_seconds() < OTP_RESEND_SECONDS:
-            raise RuntimeError("Vui lòng chờ 5 phút trước khi gửi lại mã xác thực.")
+            raise RuntimeError("Vui lòng chờ 30 giây trước khi gửi lại mã xác thực.")
 
     _VERIFICATION_CODES[normalized_email] = {
         "code": code,

@@ -1,10 +1,12 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-load_dotenv()  # đọc file .env vào biến môi trường
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_ROOT / ".env")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL is None:
