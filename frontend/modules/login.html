@@ -4,98 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Đăng nhập</title>
+    <link rel="stylesheet" href="../assets/css/styles.css">
 </head>
 <body>
-    <h1>Đăng nhập</h1>
+    <main class="auth-layout">
+        <section class="card auth-card">
+            <a class="brand" href="../">
+                <span class="brand-mark" aria-hidden="true">OJ</span>
+                <span>Online Judge</span>
+            </a>
+            <h1>Chào mừng trở lại</h1>
+            <p class="page-subtitle">Đăng nhập để tiếp tục hành trình luyện tập của bạn.</p>
 
-    <form id="login-form">
-        <div>
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" required>
-        </div>
+            <form id="login-form" class="form-grid">
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" autocomplete="email" placeholder="you@example.com" required>
+                </div>
 
-        <div>
-            <label for="password">Mật khẩu</label>
-            <input type="password" id="password" name="password" required>
-        </div>
+                <div class="field">
+                    <label for="password">Mật khẩu</label>
+                    <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Nhập mật khẩu" required>
+                </div>
 
-        <button type="submit">Đăng nhập</button>
-        <button type="button" id="register-button">Đăng kí</button>
-    </form>
+                <div class="form-actions">
+                    <button type="submit">Đăng nhập</button>
+                    <button type="button" class="secondary" id="register-button">Đăng kí</button>
+                </div>
+            </form>
 
-    <p id="error-message"></p>
+            <p class="helper-link">
+                <a href="forgot-password.html">Quên mật khẩu?</a>
+            </p>
 
-    <script>
-        const form = document.getElementById("login-form");
-        const errorMessage = document.getElementById("error-message");
-
-        document.getElementById("register-button").addEventListener("click", () => {
-            window.location.href = "register.html";
-        });
-
-        async function redirectIfLoggedIn() {
-            try {
-                const response = await fetch(
-                    "http://100.73.218.40:8000/auth/me",
-                    {
-                        method: "GET",
-                        credentials: "include"
-                    }
-                );
-
-                if (response.ok) {
-                    window.location.replace("index.html");
-                }
-            } catch (error) {
-                console.error("Could not check the current session:", error);
-            }
-        }
-
-        form.addEventListener("submit", async (event) => {
-            event.preventDefault();
-
-            const email = document.getElementById("email").value;
-            const password = document.getElementById("password").value;
-
-            errorMessage.textContent = "";
-
-            try {
-                const response = await fetch(
-                    "http://100.73.218.40:8000/auth/login",
-                    {
-                        method: "POST",
-                        credentials: "include",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            account_email: email,
-                            password: password
-                        })
-                    }
-                );
-
-                if (response.ok) {
-                    window.location.replace("../index.html");
-                    return;
-                }
-
-                if (response.headers.get("content-type")?.includes("application/json")) {
-                    const data = await response.json();
-                    errorMessage.textContent =
-                        data.detail || `Server error (${response.status})`;
-                } else {
-                    errorMessage.textContent = `Server error (${response.status})`;
-                }
-
-            } catch (error) {
-                console.error(error);
-                errorMessage.textContent =
-                    "Không thể kết nối đến server";
-            }
-        });
-
-        redirectIfLoggedIn();
-    </script>
+            <p id="error-message" class="message" role="alert"></p>
+        </section>
+    </main>
+    <script type="module" src="../assets/js/login.js"></script>
 </body>
 </html>

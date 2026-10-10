@@ -4,34 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Online Judge</title>
+    <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
-
-<script>
-    async function checkSession() {
-        try {
-            const response = await fetch(
-                "http://100.73.218.40:8000/auth/me",
-                {
-                    method: "GET",
-                    credentials: "include"
-                }
-            );
-
-            if (response.ok) {
-                window.location.replace("modules/index.html");
-            } else {
-                window.location.replace("modules/login.html");
-            }
-
-        } catch (error) {
-            console.error(error);
-            window.location.replace("modules/login.html");
-        }
-    }
-
-    checkSession();
-</script>
-
+    <main class="auth-layout">
+        <section class="card auth-card" aria-live="polite">
+            <a class="brand" href="/">
+                <span class="brand-mark" aria-hidden="true">OJ</span>
+                <span>Online Judge</span>
+            </a>
+            <h1>Đang kiểm tra phiên đăng nhập</h1>
+            <p class="page-subtitle">Vui lòng chờ trong giây lát...</p>
+        </section>
+    </main>
+    <script type="module" src="assets/js/redirect.js"></script>
 </body>
 </html>

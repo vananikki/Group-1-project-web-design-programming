@@ -4,172 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản lý tài khoản</title>
+    <link rel="stylesheet" href="../assets/css/styles.css">
 </head>
 <body>
-    <h1>Quản lý tài khoản</h1>
-    <p id="status-message" role="status">Đang kiểm tra quyền truy cập...</p>
-    <p><a href="index.html">Quay lại</a></p>
+    <main class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="../">
+                <span class="brand-mark" aria-hidden="true">OJ</span>
+                <span>Online Judge</span>
+            </a>
+            <a href="index.html">Quay lại tài khoản</a>
+        </header>
+        <div class="dashboard-header">
+            <div>
+                <h1>Quản lý tài khoản</h1>
+                <p class="page-subtitle">Quản lý vai trò và trạng thái quản trị viên.</p>
+            </div>
+        </div>
+        <p id="status-message" class="message" role="status">Đang kiểm tra quyền truy cập...</p>
 
-    <table id="accounts-table" hidden>
-        <thead>
-            <tr>
-                <th>Mã tài khoản</th>
-                <th>Tên</th>
-                <th>Email</th>
-                <th>Vai trò</th>
-                <th>Trạng thái admin</th>
-                <th>Thao tác</th>
-            </tr>
-        </thead>
-        <tbody id="accounts-list"></tbody>
-    </table>
-
-    <script>
-        const API_URL = "http://100.73.218.40:8000";
-        const statusMessage = document.getElementById("status-message");
-        const accountsTable = document.getElementById("accounts-table");
-        const accountsList = document.getElementById("accounts-list");
-        const roles = ["USER", "ADMIN", "SUPER_ADMIN"];
-
-        async function loadAccounts() {
-            try {
-                const meResponse = await fetch(`${API_URL}/auth/me`, {
-                    credentials: "include"
-                });
-
-                if (meResponse.status === 401) {
-                    window.location.replace("login.html");
-                    return;
-                }
-                if (!meResponse.ok) {
-                    throw new Error(`Session check failed (${meResponse.status})`);
-                }
-
-                const currentAccount = await meResponse.json();
-                if (currentAccount.role !== "SUPER_ADMIN") {
-                    window.location.replace("index.html");
-                    return;
-                }
-
-                const response = await fetch(`${API_URL}/admin/accounts`, {
-                    credentials: "include"
-                });
-
-                if (response.status === 401) {
-                    window.location.replace("login.html");
-                    return;
-                }
-                if (!response.ok) {
-                    throw new Error(`Could not load accounts (${response.status})`);
-                }
-
-                const accounts = await response.json();
-                renderAccounts(accounts, currentAccount.account_id);
-                accountsTable.hidden = false;
-                statusMessage.textContent = "";
-            } catch (error) {
-                console.error(error);
-                statusMessage.textContent =
-                    "Không thể tải danh sách tài khoản. Vui lòng thử lại.";
-            }
-        }
-
-        function renderAccounts(accounts, currentAccountId) {
-            accountsList.replaceChildren();
-
-            for (const account of accounts) {
-                const row = document.createElement("tr");
-                const values = [
-                    account.account_code,
-                    account.account_name,
-                    account.account_email
-                ];
-
-                for (const value of values) {
-                    const cell = document.createElement("td");
-                    cell.textContent = value;
-                    row.appendChild(cell);
-                }
-
-                const roleCell = document.createElement("td");
-                const roleSelect = document.createElement("select");
-                roleSelect.setAttribute("aria-label", `Vai trò ${account.account_email}`);
-                for (const role of roles) {
-                    const option = document.createElement("option");
-                    option.value = role;
-                    option.textContent = role;
-                    roleSelect.appendChild(option);
-                }
-                roleSelect.value = account.role;
-                roleSelect.disabled = account.account_id === currentAccountId;
-                roleCell.appendChild(roleSelect);
-                row.appendChild(roleCell);
-
-                const adminStatusCell = document.createElement("td");
-                adminStatusCell.textContent = account.admin_active ? "Đang hoạt động" : "Không hoạt động";
-                row.appendChild(adminStatusCell);
-
-                const actionCell = document.createElement("td");
-                const saveButton = document.createElement("button");
-                saveButton.type = "button";
-                saveButton.textContent = "Lưu vai trò";
-                saveButton.disabled = roleSelect.disabled;
-                saveButton.addEventListener("click", () => {
-                    updateRole(account, roleSelect, saveButton);
-                });
-                actionCell.appendChild(saveButton);
-                row.appendChild(actionCell);
-
-                accountsList.appendChild(row);
-            }
-        }
-
-        async function updateRole(account, roleSelect, saveButton) {
-            saveButton.disabled = true;
-            statusMessage.textContent = "";
-
-            try {
-                const response = await fetch(
-                    `${API_URL}/admin/accounts/${account.account_id}/role`,
-                    {
-                        method: "PATCH",
-                        credentials: "include",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({ role: roleSelect.value })
-                    }
-                );
-
-                const data = response.headers.get("content-type")?.includes("application/json")
-                    ? await response.json()
-                    : {};
-
-                if (response.status === 401) {
-                    window.location.replace("login.html");
-                    return;
-                }
-                if (!response.ok) {
-                    throw new Error(data.detail || `Could not update role (${response.status})`);
-                }
-
-                account.role = data.role;
-                account.admin_active = data.admin_active;
-                const adminStatusCell = roleSelect.closest("tr").children[4];
-                adminStatusCell.textContent = account.admin_active
-                    ? "Đang hoạt động"
-                    : "Không hoạt động";
-                statusMessage.textContent = `Đã cập nhật vai trò cho ${account.account_email}`;
-            } catch (error) {
-                console.error(error);
-                statusMessage.textContent = error.message || "Không thể cập nhật vai trò";
-                roleSelect.value = account.role;
-            } finally {
-                saveButton.disabled = false;
-            }
-        }
-
-        loadAccounts();
-    </script>
+        <section class="card table-card">
+            <div class="table-scroll">
+                <table id="accounts-table" hidden>
+                    <thead>
+                        <tr>
+                            <th>Mã tài khoản</th>
+                            <th>Tên</th>
+                            <th>Email</th>
+                            <th>Vai trò</th>
+                            <th>Trạng thái admin</th>
+                            <th>Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accounts-list"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+    <script type="module" src="../assets/js/manage_accounts.js"></script>
 </body>
 </html>

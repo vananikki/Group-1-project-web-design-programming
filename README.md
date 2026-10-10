@@ -54,7 +54,7 @@ comma-separated list of exact origins, including the scheme and port (for exampl
 Before using authentication with a new database, create the schema from the
 `backend` directory with `.venv/bin/python -m db.initialize_tables`, then start
 the backend. Open the frontend through a local web server (for example,
-`http://100.73.218.40:5500`) rather than as a `file://` URL. Create an account
+[`http://100.73.218.40:5500`](http://100.73.218.40:5500) rather than as a `file://` URL. Create an account
 from the registration page before signing in.
 
 For an existing database, apply the admin-status migration from the `backend`
@@ -64,6 +64,11 @@ accounts whose role is `ADMIN` or `SUPER_ADMIN`.
 
 ### Authentication pages and API
 
+- Shared frontend assets are kept separate from page markup:
+  - `frontend/assets/css/styles.css` contains the shared page styles.
+  - `frontend/assets/js/api.js` centralizes the backend URL and credentialed
+    fetch helper.
+  - `frontend/assets/js/` contains one JavaScript module per page.
 - `frontend/modules/login.html` is the login page. It checks the current session
   when opened and redirects an already signed-in user to the account page.
 - `frontend/modules/register.html` creates an account using a display name,
@@ -71,7 +76,9 @@ accounts whose role is `ADMIN` or `SUPER_ADMIN`.
   display name must be at least 3 characters. The form asks the user to confirm
   the password before submitting.
 - `frontend/modules/index.html` displays the signed-in account, provides the
-  logout button, and links super admins to account management.
+  account ID, name, email, account code, role, and creation date. The display
+  name can be edited from this page. It also provides the logout button and
+  links super admins to account management.
 - `frontend/modules/manage_accounts.html` lists accounts and lets super admins
   change account roles and see whether admin mode is active. Users without a
   session are redirected to login; signed-in users without the super-admin role
@@ -84,6 +91,7 @@ The frontend uses these FastAPI endpoints:
 | `POST` | `/auth/register` | Create an account; returns `409` if the email is already registered. |
 | `POST` | `/auth/login` | Verify email and password, then set the `session_id` cookie. |
 | `GET` | `/auth/me` | Return the current account when the session is valid; otherwise returns `401`. |
+| `PATCH` | `/auth/me` | Update the signed-in account's display name. |
 | `POST` | `/auth/logout` | Delete the current server-side session and clear the `session_id` cookie. |
 | `GET` | `/admin/accounts` | List accounts; requires a valid super-admin session. |
 | `PATCH` | `/admin/accounts/{account_id}/role` | Change an account role to `USER`, `ADMIN`, or `SUPER_ADMIN`; requires a valid super-admin session. |

@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.schemas import LoginIn
+from db.schemas import AccountNameUpdateIn, LoginIn
 from db.session import get_session
 from db.tables import Account, Session as UserSession, ph
 
@@ -30,6 +30,9 @@ def authenticate(session: Session, email: str, raw_password: str) -> Account | N
         except VerificationError:
             pass
         return None
+
+    if not acc.is_active:
+        return acc
 
     if not acc.verify_password(raw_password):
         return None
@@ -57,6 +60,12 @@ def login_api(
         raise HTTPException(
             status_code=401,
             detail="Email hoặc mật khẩu không đúng",
+        )
+
+    if not acc.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Tài khoản chưa được kích hoạt. Vui lòng xác thực email trước khi đăng nhập.",
         )
 
     # 2. Tạo session ID ngẫu nhiên
@@ -119,9 +128,10 @@ def get_current_account(
             detail="Session không hợp lệ",
         )
 
-    from datetime import datetime, timezone
-
-    if user_session.expires_at <= datetime.now(timezone.utc):
+    expires_at = user_session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=401,
             detail="Session đã hết hạn",
@@ -135,9 +145,61 @@ def get_current_account(
             detail="Tài khoản không tồn tại",
         )
 
+    if not account.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Tài khoản chưa được kích hoạt.",
+        )
+
     return {
         "account_id": account.account_id,
         "account_name": account.account_name,
         "account_code": account.account_code,
+        "account_email": account.account_email,
+        "created_at": account.created_at.isoformat(),
+        "role": account.role.value,
+    }
+
+
+@router.patch("/me")
+def update_current_account(
+    data: AccountNameUpdateIn,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    if session_id is None:
+        raise HTTPException(status_code=401, detail="Chưa đăng nhập")
+
+    user_session = session.get(UserSession, session_id)
+    if user_session is None:
+        raise HTTPException(status_code=401, detail="Session không hợp lệ")
+
+    expires_at = user_session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Session đã hết hạn")
+
+    account = session.get(Account, user_session.account_id)
+    if account is None:
+        raise HTTPException(status_code=401, detail="Tài khoản không tồn tại")
+
+    account_name = data.account_name.strip()
+    if len(account_name) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Tên tài khoản phải có ít nhất 3 ký tự",
+        )
+
+    account.account_name = account_name
+    session.commit()
+    session.refresh(account)
+
+    return {
+        "account_id": account.account_id,
+        "account_name": account.account_name,
+        "account_code": account.account_code,
+        "account_email": account.account_email,
+        "created_at": account.created_at.isoformat(),
         "role": account.role.value,
     }

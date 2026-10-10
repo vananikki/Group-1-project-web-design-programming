@@ -67,6 +67,14 @@ class Account(Base):
         nullable=False,
     )
 
+    # Trạng thái kích hoạt tài khoản; cần xác thực email trước khi đăng nhập
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+    )
+
     # Mã tài khoản
     account_code: Mapped[str] = mapped_column(
         String(20),

@@ -4,82 +4,67 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Online Judge</title>
+    <link rel="stylesheet" href="../assets/css/styles.css">
 </head>
 <body>
+    <main class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="../">
+                <span class="brand-mark" aria-hidden="true">OJ</span>
+                <span>Online Judge</span>
+            </a>
+            <div class="button-row">
+                <a id="manage-accounts-link" href="manage_accounts.html" hidden>Quản lý tài khoản</a>
+                <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
+            </div>
+        </header>
 
-    <h1>Online Judge</h1>
-
-    <p id="account-name"></p>
-    <p id="account-code"></p>
-    <a id="manage-accounts-link" href="manage_accounts.html" hidden>Quản lý tài khoản</a>
-
-    <button id="logout-button">Đăng xuất</button>
-    <p id="logout-error" role="alert"></p>
-
-    <script>
-        const logoutButton = document.getElementById("logout-button");
-        const logoutError = document.getElementById("logout-error");
-
-        async function loadAccount() {
-            try {
-                const response = await fetch(
-                    "http://100.73.218.40:8000/auth/me",
-                    {
-                        method: "GET",
-                        credentials: "include"
-                    }
-                );
-
-                if (!response.ok) {
-                    window.location.replace("login.html");
-                    return;
-                }
-
-                const account = await response.json();
-
-                document.getElementById("account-name").textContent =
-                    `Xin chào, ${account.account_name}`;
-
-                document.getElementById("account-code").textContent =
-                    `Mã tài khoản: ${account.account_code}`;
-                document.getElementById("manage-accounts-link").hidden =
-                    account.role !== "SUPER_ADMIN";
-
-            } catch (error) {
-                console.error(error);
-                window.location.replace("login.html");
-            }
-        }
-
-        logoutButton.addEventListener("click", async () => {
-            logoutError.textContent = "";
-            logoutButton.disabled = true;
-
-            try {
-                const response = await fetch(
-                    "http://100.73.218.40:8000/auth/logout",
-                    {
-                        method: "POST",
-                        credentials: "include"
-                    }
-                );
-
-                if (!response.ok) {
-                    logoutError.textContent = `Không thể đăng xuất (${response.status})`;
-                    logoutButton.disabled = false;
-                    return;
-                }
-
-                window.location.replace("login.html");
-            } catch (error) {
-                console.error(error);
-                logoutError.textContent = "Không thể kết nối đến server";
-                logoutButton.disabled = false;
-            }
-        });
-
-        loadAccount();
-    </script>
-
+        <section class="card dashboard-card" aria-labelledby="account-heading">
+            <div class="dashboard-header">
+                <div>
+                    <h1 id="account-heading">Thông tin tài khoản</h1>
+                    <p class="page-subtitle">Xem và cập nhật hồ sơ cá nhân của bạn.</p>
+                </div>
+            </div>
+            <dl class="profile-grid">
+                <div class="profile-item">
+                    <dt>ID tài khoản</dt>
+                    <dd id="account-id"></dd>
+                </div>
+                <div class="profile-item">
+                    <dt>Tên hiển thị</dt>
+                    <dd>
+                        <span id="account-name"></span>
+                        <input id="account-name-input" type="text" minlength="3" maxlength="100" hidden>
+                    </dd>
+                </div>
+                <div class="profile-item">
+                    <dt>Email</dt>
+                    <dd id="account-email"></dd>
+                </div>
+                <div class="profile-item">
+                    <dt>Mã tài khoản</dt>
+                    <dd id="account-code"></dd>
+                </div>
+                <div class="profile-item">
+                    <dt>Vai trò</dt>
+                    <dd id="account-role"></dd>
+                </div>
+                <div class="profile-item">
+                    <dt>Ngày tạo</dt>
+                    <dd><time id="account-created-at"></time></dd>
+                </div>
+            </dl>
+            <div class="button-row profile-actions">
+                <button id="edit-name-button" type="button">Sửa tên</button>
+                <button id="save-name-button" type="button" hidden>Lưu thay đổi</button>
+                <button id="cancel-name-button" class="secondary" type="button" hidden>Hủy</button>
+                <button id="delete-account-button" class="secondary" type="button">Xóa tài khoản</button>
+            </div>
+            <p id="profile-message" class="message" role="status"></p>
+            <p id="logout-error" class="message" role="alert"></p>
+        </section>
+    </main>
+    <script type="module" src="../assets/js/account.js"></script>
 </body>
 </html>

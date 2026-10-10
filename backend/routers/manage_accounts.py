@@ -1,12 +1,19 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from db.schemas import AccountRoleUpdateIn
 from db.session import get_session
-from db.tables import Account, AccountRole, Admin, Session as UserSession
+from db.tables import (
+    Account,
+    AccountRole,
+    Admin,
+    ManageClass,
+    Session as UserSession,
+    StudentClass,
+)
 
 router = APIRouter(prefix="/admin/accounts", tags=["account management"])
 
@@ -33,6 +40,30 @@ def get_super_admin(
         raise HTTPException(status_code=401, detail="Tài khoản không tồn tại")
     if account.role != AccountRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Không có quyền quản lý tài khoản")
+
+    return account
+
+
+def get_authenticated_account(
+    session_id: str | None,
+    session: Session,
+) -> Account:
+    if session_id is None:
+        raise HTTPException(status_code=401, detail="Chưa đăng nhập")
+
+    user_session = session.get(UserSession, session_id)
+    if user_session is None:
+        raise HTTPException(status_code=401, detail="Session không hợp lệ")
+
+    expires_at = user_session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Session đã hết hạn")
+
+    account = session.get(Account, user_session.account_id)
+    if account is None:
+        raise HTTPException(status_code=401, detail="Tài khoản không tồn tại")
 
     return account
 
@@ -116,4 +147,68 @@ def update_account_role(
         "account_email": account.account_email,
         "role": account.role.value,
         "admin_active": bool(admin and admin.is_active),
+    }
+
+
+@router.delete("/{account_id}")
+def delete_account(
+    account_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    acting_account = get_authenticated_account(session_id, session)
+    target_account = session.get(Account, account_id)
+    if target_account is None:
+        raise HTTPException(status_code=404, detail="Tài khoản không tồn tại")
+
+    if acting_account.role == AccountRole.SUPER_ADMIN:
+        if target_account.account_id == acting_account.account_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Super admin không thể tự xóa tài khoản của mình",
+            )
+
+        if target_account.role == AccountRole.SUPER_ADMIN:
+            super_admin_count = session.scalar(
+                select(func.count())
+                .select_from(Account)
+                .where(Account.role == AccountRole.SUPER_ADMIN)
+            )
+            if super_admin_count <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Không thể xóa super admin cuối cùng",
+                )
+    else:
+        if target_account.account_id != acting_account.account_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Bạn chỉ có thể xóa tài khoản của chính mình",
+            )
+
+    if target_account.admin is not None:
+        session.execute(
+            delete(ManageClass).where(
+                ManageClass.admin_id == target_account.admin.admin_id,
+            )
+        )
+        session.delete(target_account.admin)
+
+    if target_account.student is not None:
+        session.execute(
+            delete(StudentClass).where(
+                StudentClass.student_id == target_account.student.student_id,
+            )
+        )
+        session.delete(target_account.student)
+
+    session.execute(
+        delete(UserSession).where(UserSession.account_id == target_account.account_id)
+    )
+    session.delete(target_account)
+    session.commit()
+
+    return {
+        "message": "Xóa tài khoản thành công",
+        "deleted_account_id": account_id,
     }

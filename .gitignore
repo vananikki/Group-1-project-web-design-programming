@@ -1,6 +1,7 @@
 # Python virtual environment
 .venv/
 venv/
+.env/
 
 # Environment variables / secrets
 .env
@@ -11,3 +12,4 @@ __pycache__/
 
 #storage
 code-storage/
+token.json
