@@ -1,5 +1,5 @@
-from session import engine
-from tables import Base
+from db.session import engine
+from db.tables_phase1 import Base
 
 
 Base.metadata.create_all(engine)

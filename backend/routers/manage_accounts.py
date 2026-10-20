@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from db.schemas import AccountRoleUpdateIn
 from db.session import get_session
-from db.tables import (
+from db.tables_phase1 import (
     Account,
     AccountRole,
     Admin,

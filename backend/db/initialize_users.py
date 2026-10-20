@@ -1,5 +1,5 @@
-from session import engine
-from tables import Account, AccountRole, ph
+from db.session import engine
+from db.tables_phase1 import Account, AccountRole, ph
 from sqlalchemy.orm import Session
 
 

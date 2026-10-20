@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from db.schemas import validate_password_strength
 from db.session import get_session
-from db.tables import Account
+from db.tables_phase1 import Account
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]

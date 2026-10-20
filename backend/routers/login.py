@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from db.schemas import AccountNameUpdateIn, LoginIn
 from db.session import get_session
-from db.tables import Account, Session as UserSession, ph
+from db.tables_phase1 import Account, Session as UserSession, ph
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

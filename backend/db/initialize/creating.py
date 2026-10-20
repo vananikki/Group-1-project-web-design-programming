@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.tables import Base, Account
+from db.tables_phase1 import Base, Account
 
 
 # ============================================================
@@ -48,7 +48,7 @@ class Problem(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "time_limit > 0 AND time_limit < 10",
+            "time_limit > 0 AND time_limit <= 10",
             name="ck_problem_time_limit",
         ),
         CheckConstraint(

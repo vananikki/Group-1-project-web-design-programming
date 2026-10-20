@@ -4,7 +4,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from db.session import get_session
-from db.tables import Session as UserSession
+from db.tables_phase1 import Session as UserSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

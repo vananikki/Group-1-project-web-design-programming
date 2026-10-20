@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from db.schemas import RegisterIn, validate_password_strength
 from db.session import get_session
-from db.tables import Account, AccountRole
+from db.tables_phase1 import Account, AccountRole
 from routers.authenticate import send_verification_code
 
 

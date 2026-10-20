@@ -9,7 +9,7 @@ from pydantic import (
     field_validator,
 )
 
-from db.tables import AccountRole
+from db.tables_phase1 import AccountRole
 
 PASSWORD_REQUIREMENTS_MESSAGE = (
     "Mật khẩu phải có ít nhất 8 ký tự, có chữ và số, 1 ký tự đặc biệt và 1 chữ cái in hoa"

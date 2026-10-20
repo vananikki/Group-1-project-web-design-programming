@@ -1,6 +1,7 @@
 
 from datetime import datetime
 from enum import Enum as PyEnum
+from typing import TYPE_CHECKING
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
@@ -22,7 +23,8 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from backend.db.initialize.creating import Contest, Problem
+if TYPE_CHECKING:
+    from db.tables_phase2 import Contest, Problem
 
 
 # =========================================================
@@ -136,7 +138,6 @@ class Account(Base):
         back_populates="account",
         cascade="all, delete-orphan",
     )
-
 
     created_problems: Mapped[list["Problem"]] = relationship(
         "Problem",

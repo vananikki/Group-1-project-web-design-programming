@@ -2,7 +2,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from db.session import engine
-from db.tables import Account, AccountRole, Admin
+from db.tables_phase1 import Account, AccountRole, Admin
 
 
 with engine.begin() as connection:

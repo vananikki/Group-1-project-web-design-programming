@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import routers.authenticate as auth_router
-from db.tables import Account, AccountRole, Base, Session as UserSession
+from db.tables_phase1 import Account, AccountRole, Base, Session as UserSession
 from src.app import app
 from db.session import get_session
 
