@@ -22,6 +22,8 @@ from sqlalchemy.orm import (
     relationship,
 )
 
+from backend.db.initialize.creating import Contest, Problem
+
 
 # =========================================================
 # Base
@@ -135,6 +137,19 @@ class Account(Base):
         cascade="all, delete-orphan",
     )
 
+
+    created_problems: Mapped[list["Problem"]] = relationship(
+        "Problem",
+        foreign_keys="Problem.created_by",
+        back_populates="creator",
+    )
+
+    created_contests: Mapped[list["Contest"]] = relationship(
+        "Contest",
+        foreign_keys="Contest.created_by",
+        back_populates="creator",
+    )
+
     # =====================================================
     # Password methods
     # =====================================================
@@ -158,6 +173,7 @@ class Account(Base):
             self.set_password(raw_password)
 
         return True
+    
 
 
 # =========================================================
