@@ -24,7 +24,7 @@ from sqlalchemy.orm import (
 )
 
 if TYPE_CHECKING:
-    from db.tables_phase2 import Contest, Problem
+    from db.tables_phase2 import Contest, Problem, Submission
 
 
 # =========================================================
@@ -149,6 +149,11 @@ class Account(Base):
         "Contest",
         foreign_keys="Contest.created_by",
         back_populates="creator",
+    )
+    submissions : Mapped[list["Submission"]] = relationship(
+        "Submission",
+        foreign_keys="Submission.account_id",
+        back_populates="account",
     )
 
     # =====================================================
