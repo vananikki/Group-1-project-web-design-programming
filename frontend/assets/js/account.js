@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js";
+import { apiFetch, readResponse } from "./api.js?v=20261021b";
 
 const logoutButton = document.getElementById("logout-button");
 const logoutError = document.getElementById("logout-error");
@@ -53,6 +53,8 @@ async function loadAccount() {
 
         document.getElementById("manage-accounts-link").hidden =
             currentAccount.role !== "SUPER_ADMIN";
+        document.getElementById("judge-admin-link").hidden =
+            currentAccount.role !== "ADMIN" && currentAccount.role !== "SUPER_ADMIN";
     } catch (error) {
         console.error(error);
         window.location.replace("login.html");

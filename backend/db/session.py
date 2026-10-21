@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from datetime import timedelta
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -12,6 +13,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL is None:
     raise RuntimeError("Chưa đặt biến môi trường DATABASE_URL")
 
+SESSION_TTL = timedelta(days=1)
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
+
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
@@ -21,4 +25,3 @@ engine = create_engine(
 def get_session():
     with Session(engine) as session:
         yield session
-

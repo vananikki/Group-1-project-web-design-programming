@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from argon2.exceptions import VerificationError
 from fastapi import APIRouter, Cookie, Depends, HTTPException
@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.schemas import AccountNameUpdateIn, LoginIn
-from db.session import get_session
+from db.session import SESSION_COOKIE_SECURE, SESSION_TTL, get_session
 from db.tables_phase1 import Account, Session as UserSession, ph
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -71,8 +71,8 @@ def login_api(
     # 2. Tạo session ID ngẫu nhiên
     session_id = secrets.token_urlsafe(32)
 
-    # 3. Session có hiệu lực trong 1 ngày
-    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    # Keep database expiry and the browser cookie lifetime in sync.
+    expires_at = datetime.now(timezone.utc) + SESSION_TTL
 
     # 4. Lưu session vào database
     user_session = UserSession(
@@ -98,9 +98,9 @@ def login_api(
         key="session_id",
         value=session_id,
         httponly=True,
-        secure=False,      # local HTTP; production dùng HTTPS → True
+        secure=SESSION_COOKIE_SECURE,
         samesite="lax",
-        max_age=7 * 24 * 60 * 60,
+        max_age=int(SESSION_TTL.total_seconds()),
     )
 
     return response

@@ -7,15 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine
 
 from routers.authenticate import router as authenticate_router
+from routers.judge_admin import router as judge_admin_router, student_router
 from routers.login import router as login_router
 from routers.logout import router as logout_router
 from routers.manage_accounts import router as manage_accounts_router
 from routers.register import router as register_router
 
+# Đọc file .env theo đường dẫn thực của project, không phụ thuộc cwd
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(BACKEND_ROOT / ".env")
 
+# Lấy DATABASE_URL từ .env
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Tạo kết nối tới PostgreSQL
 engine = create_engine(DATABASE_URL)
 
 
@@ -53,6 +58,8 @@ app.include_router(login_router)
 app.include_router(logout_router)
 app.include_router(register_router)
 app.include_router(manage_accounts_router)
+app.include_router(judge_admin_router)
+app.include_router(student_router)
 
 
 @app.get("/")

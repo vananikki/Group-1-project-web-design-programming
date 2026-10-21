@@ -28,17 +28,21 @@ def override_get_session():
         db.close()
 
 
-app.dependency_overrides[get_session] = override_get_session
 
 
-def setup_function():
-    Base.metadata.create_all(bind=engine)
-
-
-def teardown_function():
-    Base.metadata.drop_all(bind=engine)
-    app.dependency_overrides.clear()
+@pytest.fixture(autouse=True)
+def _override_db_session():
+    previous = app.dependency_overrides.get(get_session)
     app.dependency_overrides[get_session] = override_get_session
+    Base.metadata.create_all(bind=engine)
+    try:
+        yield
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        if previous is None:
+            app.dependency_overrides.pop(get_session, None)
+        else:
+            app.dependency_overrides[get_session] = previous
 
 
 def _create_account(email: str, role: AccountRole, *, code: str = None, name: str = None):

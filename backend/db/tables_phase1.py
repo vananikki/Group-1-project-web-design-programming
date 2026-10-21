@@ -139,22 +139,8 @@ class Account(Base):
         cascade="all, delete-orphan",
     )
 
-    created_problems: Mapped[list["Problem"]] = relationship(
-        "Problem",
-        foreign_keys="Problem.created_by",
-        back_populates="creator",
-    )
-
-    created_contests: Mapped[list["Contest"]] = relationship(
-        "Contest",
-        foreign_keys="Contest.created_by",
-        back_populates="creator",
-    )
-    submissions : Mapped[list["Submission"]] = relationship(
-        "Submission",
-        foreign_keys="Submission.account_id",
-        back_populates="account",
-    )
+    # Relationship assignments are attached below after the phase-two models
+    # are imported so SQLAlchemy can resolve the foreign-key targets safely.
 
     # =====================================================
     # Password methods
@@ -397,3 +383,91 @@ class StudentClass(Base):
     student: Mapped["Student"] = relationship(
         back_populates="student_classes",
     )
+
+
+class ClassJoinRequest(Base):
+    __tablename__ = "class_join_request"
+
+    join_request_id: Mapped[int] = mapped_column(
+        Identity(),
+        primary_key=True,
+    )
+
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_class.class_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("student.student_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        server_default="pending",
+        nullable=False,
+    )
+
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    academic_class: Mapped["AcademicClass"] = relationship()
+    student: Mapped["Student"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "class_id",
+            "student_id",
+            name="uq_class_join_request",
+        ),
+    )
+
+
+try:
+    from db.tables_phase2 import (
+        AcademicClassContest,
+        AcademicClassProblem,
+        Contest,
+        Problem,
+        Submission,
+    )
+except ModuleNotFoundError:
+    from tables_phase2 import (
+        AcademicClassContest,
+        AcademicClassProblem,
+        Contest,
+        Problem,
+        Submission,
+    )
+
+Account.created_problems = relationship(
+    "Problem",
+    foreign_keys="Problem.created_by",
+    back_populates="creator",
+)
+Account.created_contests = relationship(
+    "Contest",
+    foreign_keys="Contest.created_by",
+    back_populates="creator",
+)
+Account.submissions = relationship(
+    "Submission",
+    foreign_keys="Submission.account_id",
+    back_populates="account",
+)
+
+AcademicClass.class_problems = relationship(
+    "AcademicClassProblem",
+    back_populates="academic_class",
+    cascade="all, delete-orphan",
+)
+AcademicClass.class_contests = relationship(
+    "AcademicClassContest",
+    back_populates="academic_class",
+    cascade="all, delete-orphan",
+)

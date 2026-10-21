@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js";
+import { apiFetch, readResponse } from "./api.js?v=20261021b";
 
 const form = document.getElementById("login-form");
 const errorMessage = document.getElementById("error-message");

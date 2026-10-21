@@ -1,5 +1,6 @@
 
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -17,10 +18,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
+if TYPE_CHECKING:
+    from db.tables_phase1 import AcademicClass
+
 try:
-    from db.tables_phase1 import Account, Base
+    from db.tables_phase1 import Account, AcademicClass, Base
 except ModuleNotFoundError:
-    from tables_phase1 import Account, Base
+    from tables_phase1 import Account, AcademicClass, Base
 
 
 # =========================================================
@@ -123,6 +127,39 @@ class Solution(Base):
         "Language",
         back_populates="solutions",
     )
+
+class Testcase(Base): 
+    __tablename__ = "testcase"
+
+    testcase_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    problem_id: Mapped[int] = mapped_column(
+        ForeignKey("problem.problem_id"),
+        nullable=False,
+    )
+
+    point: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    input_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    expected_output: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    problem: Mapped["Problem"] = relationship(
+        "Problem",
+        back_populates="testcases",
+    )
     
 
 class Problem(Base):
@@ -160,20 +197,6 @@ class Problem(Base):
     )
 
     output_description: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    sample_input: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    sample_output: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    solution : Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
     )
@@ -223,8 +246,20 @@ class Problem(Base):
         back_populates="problem",
     )
 
+    class_problems: Mapped[list["AcademicClassProblem"]] = relationship(
+        "AcademicClassProblem",
+        back_populates="problem",
+        cascade="all, delete-orphan",
+    )
+
     solutions: Mapped[list["Solution"]] = relationship(
         "Solution",
+        back_populates="problem",
+        cascade="all, delete-orphan",
+    )
+
+    testcases: Mapped[list["Testcase"]] = relationship(
+        "Testcase",
         back_populates="problem",
         cascade="all, delete-orphan",
     )
@@ -298,6 +333,17 @@ class Contest(Base):
         order_by="ContestProblem.problem_order",
     )
 
+    submissions: Mapped[list["Submission"]] = relationship(
+        "Submission",
+        back_populates="contest",
+    )
+
+    class_contests: Mapped[list["AcademicClassContest"]] = relationship(
+        "AcademicClassContest",
+        back_populates="contest",
+        cascade="all, delete-orphan",
+    )
+
     @property
     def problem_count(self) -> int:
         """Số bài trong contest khi relationship đã được tải."""
@@ -311,19 +357,76 @@ class Contest(Base):
 MAX_PROBLEMS_PER_CONTEST = 20
 
 
+class AcademicClassProblem(Base):
+    __tablename__ = "academic_class_problem"
+
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_class.class_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    problem_id: Mapped[int] = mapped_column(
+        ForeignKey("problem.problem_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    added_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    is_required: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+    )
+
+    academic_class: Mapped["AcademicClass"] = relationship(
+        "AcademicClass",
+        back_populates="class_problems",
+    )
+
+    problem: Mapped["Problem"] = relationship(
+        "Problem",
+        back_populates="class_problems",
+    )
+
+
+class AcademicClassContest(Base):
+    __tablename__ = "academic_class_contest"
+
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_class.class_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    contest_id: Mapped[int] = mapped_column(
+        ForeignKey("contest.contest_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    added_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    academic_class: Mapped["AcademicClass"] = relationship(
+        "AcademicClass",
+        back_populates="class_contests",
+    )
+
+    contest: Mapped["Contest"] = relationship(
+        "Contest",
+        back_populates="class_contests",
+    )
+
+
 class ContestProblem(Base):
     __tablename__ = "contest_problem"
 
     __table_args__ = (
-        # Một vị trí chỉ được gán cho tối đa một bài trong contest.
-        # PostgreSQL cho phép nhiều hàng có problem_order = NULL.
         UniqueConstraint(
             "contest_id",
             "problem_order",
             name="uq_contest_problem_order",
         ),
-
-        # Thứ tự có thể chưa xác định, hoặc nằm trong khoảng 1–20.
         CheckConstraint(
             "problem_order IS NULL "
             "OR (problem_order BETWEEN 1 AND 20)",
@@ -576,6 +679,11 @@ class Submission(Base):
         nullable=False,
     )
 
+    contest_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contest.contest_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     language_id: Mapped[int] = mapped_column(
         ForeignKey("language.language_id"),
         nullable=False,
@@ -592,6 +700,11 @@ class Submission(Base):
         nullable=False,
     )
 
+    source_code: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     score: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
@@ -599,6 +712,11 @@ class Submission(Base):
 
     problem: Mapped["Problem"] = relationship(
         "Problem",
+        back_populates="submissions",
+    )
+
+    contest: Mapped["Contest | None"] = relationship(
+        "Contest",
         back_populates="submissions",
     )
 

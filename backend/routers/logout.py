@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from db.session import get_session
+from db.session import SESSION_COOKIE_SECURE, get_session
 from db.tables_phase1 import Session as UserSession
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,7 +26,7 @@ def logout_api(
     response.delete_cookie(
         key="session_id",
         httponly=True,
-        secure=False,
+        secure=SESSION_COOKIE_SECURE,
         samesite="lax",
     )
     return response
