@@ -31,9 +31,6 @@ def authenticate(session: Session, email: str, raw_password: str) -> Account | N
             pass
         return None
 
-    if not acc.is_active:
-        return acc
-
     if not acc.verify_password(raw_password):
         return None
 

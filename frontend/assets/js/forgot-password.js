@@ -34,7 +34,7 @@ async function sendVerificationCode() {
 
         const data = await readResponse(response);
         if (response.ok) {
-            setStatus("Mã xác thực đã được gửi đến email của bạn.");
+            setStatus("Yêu cầu đã được đưa vào hàng đợi. Mã xác thực sẽ sớm được gửi.");
             codeInput.focus();
             return;
         }

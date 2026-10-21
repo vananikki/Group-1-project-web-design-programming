@@ -5,6 +5,10 @@ const statusMessage = document.getElementById("status-message");
 const sendCodeButton = document.getElementById("send-code-button");
 const emailInput = document.getElementById("email");
 const codeInput = document.getElementById("verification-code");
+const activationEmail = new URLSearchParams(window.location.search).get("email");
+if (activationEmail) {
+    emailInput.value = activationEmail;
+}
 
 const setStatus = (message, isError = false) => {
     statusMessage.textContent = message;
@@ -32,7 +36,7 @@ async function sendVerificationCode() {
 
         const data = await readResponse(response);
         if (response.ok) {
-            setStatus("Mã xác thực đã được gửi đến email của bạn.");
+            setStatus("Yêu cầu đã được đưa vào hàng đợi. Mã xác thực sẽ sớm được gửi.");
             codeInput.focus();
             return;
         }
@@ -79,7 +83,9 @@ form.addEventListener("submit", async (event) => {
         if (response.ok) {
             setStatus("Kích hoạt tài khoản thành công. Đang chuyển đến đăng nhập...");
             window.setTimeout(() => {
-                window.location.replace("login.html");
+                window.location.replace(
+                    `login.html?activated=1&email=${encodeURIComponent(accountEmail)}`,
+                );
             }, 1200);
             return;
         }

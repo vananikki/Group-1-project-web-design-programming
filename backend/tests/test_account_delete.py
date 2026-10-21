@@ -117,19 +117,58 @@ def test_register_rejects_weak_password():
     assert "Mật khẩu phải" in response.json()["detail"][0]["msg"] or "Mật khẩu phải" in response.text
 
 
-def test_resend_verification_code_allows_30_seconds_between_requests():
+def test_verification_email_rate_limits_per_address_and_globally():
     email = "cooldown@example.com"
-    auth_router._VERIFICATION_CODES.clear()
+    now = [100.0]
+    limiter = auth_router._EmailRateLimiter(clock=lambda: now[0])
+    limiter.reserve(email)
+    limiter.mark_sent(email)
 
-    first_sent = datetime.now(timezone.utc)
-    auth_router._VERIFICATION_CODES[email] = {
-        "code": "123456",
-        "sent_at": first_sent,
-        "expires_at": first_sent + timedelta(minutes=5),
-    }
+    now[0] += 179
+    with pytest.raises(RuntimeError, match="3 phút"):
+        limiter.reserve(email)
 
-    with pytest.raises(RuntimeError, match="30 giây"):
-        auth_router._store_verification_code(email)
+    now[0] += 1
+    limiter.reserve(email)
+    limiter.release(email)
+
+    global_limiter = auth_router._EmailRateLimiter(clock=lambda: now[0])
+    for index in range(auth_router.EMAIL_SEND_LIMIT):
+        target = f"user{index}@example.com"
+        global_limiter.reserve(target)
+        global_limiter.mark_sent(target)
+
+    assert global_limiter.wait_for_global_slot() == 60
+    now[0] += 60
+    assert global_limiter.wait_for_global_slot() == 0
+
+
+def test_verification_code_expires_after_two_minutes():
+    email = "expiry@example.com"
+    code = auth_router._store_verification_code(email, "123456")
+    payload = auth_router._VERIFICATION_CODES[email]
+
+    assert code == "123456"
+    assert (
+        payload["expires_at"] - payload["sent_at"]
+    ).total_seconds() == auth_router.OTP_TTL_SECONDS == 120
+
+
+def test_send_code_endpoint_queues_email(monkeypatch):
+    queued_emails = []
+    monkeypatch.setattr(
+        auth_router._VERIFICATION_EMAIL_QUEUE,
+        "enqueue",
+        queued_emails.append,
+    )
+
+    response = TestClient(app).post(
+        "/auth/send-code",
+        json={"account_email": "queue@example.com"},
+    )
+
+    assert response.status_code == 202
+    assert queued_emails == ["queue@example.com"]
 
 
 def test_forgot_password_flow(monkeypatch):
@@ -141,12 +180,12 @@ def test_forgot_password_flow(monkeypatch):
     auth_router._VERIFICATION_CODES[email] = {
         "code": code,
         "sent_at": datetime.now(timezone.utc),
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=2),
     }
 
     client = TestClient(app)
     response = client.post("/auth/forgot-password", json={"account_email": email})
-    assert response.status_code == 200
+    assert response.status_code == 202
 
     reset_response = client.post(
         "/auth/reset-password",

@@ -41,14 +41,14 @@ def client():
             app.dependency_overrides[get_session] = previous
 
 
-def create_active_account():
+def create_account(*, is_active=True):
     with TestingSessionLocal() as db:
         account = Account(
             account_email="login@example.com",
             account_code="LOGIN1",
             account_name="Login User",
             role=AccountRole.USER,
-            is_active=True,
+            is_active=is_active,
         )
         account.set_password("StrongPassword123")
         db.add(account)
@@ -58,7 +58,7 @@ def create_active_account():
 
 
 def test_login_sets_http_only_cookie_with_matching_session_expiry(client):
-    account_id = create_active_account()
+    account_id = create_account()
 
     response = client.post(
         "/auth/login",
@@ -94,7 +94,7 @@ def test_login_sets_http_only_cookie_with_matching_session_expiry(client):
 
 
 def test_login_rejects_invalid_password_without_setting_session_cookie(client):
-    create_active_account()
+    create_account()
 
     response = client.post(
         "/auth/login",
@@ -107,3 +107,32 @@ def test_login_rejects_invalid_password_without_setting_session_cookie(client):
     assert response.status_code == 401
     assert "set-cookie" not in response.headers
     assert client.get("/auth/me").status_code == 401
+
+
+def test_unverified_email_requires_correct_password_and_never_creates_session(client):
+    create_account(is_active=False)
+
+    invalid_password_response = client.post(
+        "/auth/login",
+        json={
+            "account_email": "login@example.com",
+            "password": "WrongPassword123",
+        },
+    )
+    assert invalid_password_response.status_code == 401
+    assert invalid_password_response.json()["detail"] == "Email hoặc mật khẩu không đúng"
+    assert "set-cookie" not in invalid_password_response.headers
+
+    correct_password_response = client.post(
+        "/auth/login",
+        json={
+            "account_email": "login@example.com",
+            "password": "StrongPassword123",
+        },
+    )
+    assert correct_password_response.status_code == 403
+    assert "chưa được kích hoạt" in correct_password_response.json()["detail"]
+    assert "set-cookie" not in correct_password_response.headers
+
+    with TestingSessionLocal() as db:
+        assert db.query(UserSession).count() == 0

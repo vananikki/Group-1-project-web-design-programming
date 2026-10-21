@@ -2,6 +2,16 @@ import { apiFetch, readResponse } from "./api.js?v=20261021b";
 
 const form = document.getElementById("login-form");
 const errorMessage = document.getElementById("error-message");
+const emailInput = document.getElementById("email");
+const params = new URLSearchParams(window.location.search);
+
+if (params.has("email")) {
+    emailInput.value = params.get("email");
+}
+if (params.get("activated") === "1") {
+    errorMessage.textContent = "Email đã được xác thực. Bạn có thể đăng nhập.";
+    errorMessage.classList.add("success");
+}
 
 document.getElementById("register-button").addEventListener("click", () => {
     window.location.href = "register.html";
@@ -46,16 +56,23 @@ form.addEventListener("submit", async (event) => {
         }
 
         if (response.status === 403) {
-            window.location.replace("activate.html");
+            const email = emailInput.value.trim();
+            window.location.replace(`activate.html?email=${encodeURIComponent(email)}`);
             return;
         }
 
         errorMessage.textContent =
             data.detail || `Server error (${response.status})`;
+        errorMessage.classList.toggle("error", true);
     } catch (error) {
         console.error(error);
         errorMessage.textContent = "Không thể kết nối đến server";
     }
+});
+
+document.getElementById("login-form").addEventListener("input", () => {
+    errorMessage.textContent = "";
+    errorMessage.classList.remove("error", "success");
 });
 
 redirectIfLoggedIn();

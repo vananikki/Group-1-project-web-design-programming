@@ -231,6 +231,10 @@ The current app supports the following flows.
 - password strength validation is enforced
 - email uniqueness is checked
 - a new account is created as a `USER` by default
+- verification and password-reset emails are queued; the single-process queue sends at most five emails in a rolling minute and at most one email per address in three minutes
+- six-digit codes expire two minutes after delivery
+
+The email queue and its rate-limit state are held in backend process memory, so queued mail is lost on restart and limits are per process. Run a single backend worker to preserve these limits; multi-worker or multi-instance deployments need a shared queue and limiter.
 
 ### Login
 

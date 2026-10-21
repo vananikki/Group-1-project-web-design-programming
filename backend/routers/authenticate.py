@@ -1,9 +1,13 @@
 import base64
+import logging
 import os
 import secrets
-from pathlib import Path
+import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,10 +38,13 @@ GOOGLE_TOKEN_PATH = os.getenv(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "token.json")),
 )
 
-OTP_TTL_SECONDS = 5 * 60
-OTP_RESEND_SECONDS = 30
+OTP_TTL_SECONDS = 2 * 60
+OTP_RESEND_SECONDS = 3 * 60
+EMAIL_SEND_LIMIT = 5
+EMAIL_SEND_WINDOW_SECONDS = 60
 _VERIFICATION_CODES: dict[str, dict[str, str | datetime]] = {}
 _GMAIL_SERVICE = None
+_LOGGER = logging.getLogger(__name__)
 
 
 class EmailRequest(BaseModel):
@@ -122,6 +129,114 @@ def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+class _EmailRateLimiter:
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._sent_times: deque[float] = deque()
+        self._last_sent_by_email: dict[str, float] = {}
+        self._pending_emails: set[str] = set()
+        self._lock = threading.Lock()
+
+    def reserve(self, email: str) -> None:
+        now = self._clock()
+        with self._lock:
+            expired_emails = [
+                address
+                for address, sent_at in self._last_sent_by_email.items()
+                if now - sent_at >= OTP_RESEND_SECONDS
+            ]
+            for address in expired_emails:
+                self._last_sent_by_email.pop(address, None)
+
+            last_sent = self._last_sent_by_email.get(email)
+            if email in self._pending_emails:
+                raise RuntimeError("Email xác thực đang chờ gửi. Vui lòng đợi.")
+            if last_sent is not None:
+                remaining = OTP_RESEND_SECONDS - (now - last_sent)
+                if remaining > 0:
+                    raise RuntimeError(
+                        "Vui lòng chờ 3 phút giữa các lần gửi email đến cùng địa chỉ."
+                    )
+                self._last_sent_by_email.pop(email, None)
+            self._pending_emails.add(email)
+
+    def wait_for_global_slot(self) -> float:
+        now = self._clock()
+        with self._lock:
+            while (
+                self._sent_times
+                and now - self._sent_times[0] >= EMAIL_SEND_WINDOW_SECONDS
+            ):
+                self._sent_times.popleft()
+            if len(self._sent_times) < EMAIL_SEND_LIMIT:
+                return 0
+            return max(
+                0,
+                self._sent_times[0] + EMAIL_SEND_WINDOW_SECONDS - now,
+            )
+
+    def mark_sent(self, email: str) -> None:
+        now = self._clock()
+        with self._lock:
+            self._sent_times.append(now)
+            self._last_sent_by_email[email] = now
+            self._pending_emails.discard(email)
+
+    def release(self, email: str) -> None:
+        with self._lock:
+            self._pending_emails.discard(email)
+
+
+class _VerificationEmailQueue:
+    def __init__(self):
+        self._emails: deque[str] = deque()
+        self._condition = threading.Condition()
+        self._rate_limiter = _EmailRateLimiter()
+        self._worker: threading.Thread | None = None
+
+    def enqueue(self, email: str) -> None:
+        with self._condition:
+            self._rate_limiter.reserve(email)
+            self._emails.append(email)
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(
+                    target=self._run,
+                    name="verification-email-queue",
+                    daemon=True,
+                )
+                try:
+                    self._worker.start()
+                except RuntimeError:
+                    self._emails.pop()
+                    self._rate_limiter.release(email)
+                    raise
+            self._condition.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._emails:
+                    self._condition.wait()
+                wait_seconds = self._rate_limiter.wait_for_global_slot()
+                if wait_seconds > 0:
+                    self._condition.wait(timeout=wait_seconds)
+                    continue
+                email = self._emails.popleft()
+
+            code = _generate_verification_code()
+            try:
+                _deliver_verification_code(email, code)
+                self._rate_limiter.mark_sent(email)
+                _store_verification_code(email, code)
+            except Exception:
+                _LOGGER.exception("Could not deliver a queued verification email")
+                self._rate_limiter.release(email)
+                continue
+
+
+_VERIFICATION_EMAIL_QUEUE = _VerificationEmailQueue()
+
+
 def _generate_verification_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
@@ -137,17 +252,11 @@ def _clean_expired_codes() -> None:
         _VERIFICATION_CODES.pop(email, None)
 
 
-def _store_verification_code(email: str) -> str:
+def _store_verification_code(email: str, code: str | None = None) -> str:
     normalized_email = _normalize_email(email)
     now = datetime.now(timezone.utc)
-    code = _generate_verification_code()
     _clean_expired_codes()
-
-    payload = _VERIFICATION_CODES.get(normalized_email)
-    if payload is not None:
-        last_sent = datetime.fromisoformat(str(payload["sent_at"]))
-        if (now - last_sent).total_seconds() < OTP_RESEND_SECONDS:
-            raise RuntimeError("Vui lòng chờ 30 giây trước khi gửi lại mã xác thực.")
+    code = code or _generate_verification_code()
 
     _VERIFICATION_CODES[normalized_email] = {
         "code": code,
@@ -155,6 +264,20 @@ def _store_verification_code(email: str) -> str:
         "expires_at": now + timedelta(seconds=OTP_TTL_SECONDS),
     }
     return code
+
+
+def _deliver_verification_code(email: str, code: str) -> None:
+    subject = "Mã xác thực email - Online Judge"
+    body = (
+        "Xin chào!\n\n"
+        f"Mã xác thực email của bạn là: {code}\n"
+        "Mã này có hiệu lực trong 2 phút.\n\n"
+        "Nếu bạn không yêu cầu mã này, hãy bỏ qua email này."
+    )
+    try:
+        send_email(email, subject, body)
+    except HttpError as exc:  # pragma: no cover - depends on Gmail API
+        raise RuntimeError("Không thể gửi mã xác thực qua Gmail") from exc
 
 
 def _validate_verification_code(email: str, submitted_code: str) -> bool:
@@ -179,22 +302,10 @@ def send_verification_code(email: str) -> dict:
     if not normalized_email or "@" not in normalized_email:
         raise ValueError("Email không hợp lệ")
 
-    code = _store_verification_code(normalized_email)
-    subject = "Mã xác thực email - Online Judge"
-    body = (
-        "Xin chào!\n\n"
-        f"Mã xác thực email của bạn là: {code}\n"
-        "Mã này có hiệu lực trong 5 phút.\n\n"
-        "Nếu bạn không yêu cầu mã này, hãy bỏ qua email này."
-    )
-
-    try:
-        send_email(normalized_email, subject, body)
-    except HttpError as exc:  # pragma: no cover - depends on Gmail API
-        raise RuntimeError("Không thể gửi mã xác thực qua Gmail") from exc
+    _VERIFICATION_EMAIL_QUEUE.enqueue(normalized_email)
 
     return {
-        "message": "Mã xác thực đã được gửi đến email của bạn.",
+        "message": "Yêu cầu gửi mã xác thực đã được đưa vào hàng đợi.",
         "email": normalized_email,
     }
 
@@ -219,8 +330,8 @@ def activate_account_from_email(email: str, session: Session) -> bool:
     return True
 
 
-@router.post("/send-code")
-@router.post("/send-otp")
+@router.post("/send-code", status_code=202)
+@router.post("/send-otp", status_code=202)
 def send_code_api(
     data: EmailRequest,
     session: Session = Depends(get_session),
@@ -267,7 +378,7 @@ def verify_code_api(
     }
 
 
-@router.post("/forgot-password")
+@router.post("/forgot-password", status_code=202)
 def forgot_password_api(
     data: ForgotPasswordRequest,
     session: Session = Depends(get_session),
