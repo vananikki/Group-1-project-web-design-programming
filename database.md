@@ -8,7 +8,8 @@ Backend kết nối cơ sở dữ liệu qua `DATABASE_URL` trong `backend/.env`
 > Khi thay đổi model, chạy các lệnh khởi tạo/migration trong README trước khi
 > khởi động backend. Đặc biệt, `initialize_tables.py` tạo bảng còn thiếu nhưng
 > không tự thêm cột mới vào bảng đã tồn tại; `migrate_judge_admin.py` xử lý
-> những thay đổi bổ sung như `problem.data_constraints`.
+> các thay đổi bổ sung như testcase metadata, dữ liệu nguồn Base64, metrics
+> chấm bài và ngữ cảnh lớp của submission.
 
 ## Entity relationship diagram
 
@@ -20,6 +21,7 @@ erDiagram
     ACCOUNT o|--o{ PROBLEM : "creates"
     ACCOUNT o|--o{ CONTEST : "creates"
     ACCOUNT o|--o{ SUBMISSION : "submits"
+    ACADEMIC_CLASS o|--o{ SUBMISSION : "submission context"
 
     STUDENT ||--o{ STUDENT_CLASS : "membership"
     ACADEMIC_CLASS ||--o{ STUDENT_CLASS : "has students"
@@ -148,11 +150,17 @@ erDiagram
         int problem_id FK
         int account_id FK
         int contest_id FK
+        int class_id FK
         int language_id FK
         datetime submitted_at
         string status
-        text source_code
+        text source_code "Base64 encoded"
+        boolean source_code_encoded
         int score
+        int passed_testcases
+        int total_testcases
+        int runtime_ms
+        int memory_kb
     }
 ```
 
@@ -200,12 +208,24 @@ request separately from an accepted `student_class` membership.
 | `testcase` | `testcase_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `point` integer required; `input_data` and `expected_output` required text. |
 | `solution` | `solution_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `language_id` integer required FK → `language.language_id`; `content` required text. Stores reference solutions, not user submissions. |
 | `language` | `language_id` integer PK (ID synced from Judge0); `name` varchar(50) required, unique. |
-| `submission` | `submission_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `account_id` nullable integer FK → `account.account_id`; `contest_id` nullable integer FK → `contest.contest_id` with `ON DELETE SET NULL`; `language_id` integer required FK → `language.language_id`; `submitted_at` timezone-aware timestamp required, default current time; `status` varchar(50) required; `source_code` nullable text; `score` nullable integer. |
+| `submission` | `submission_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `account_id` nullable integer FK → `account.account_id`; `contest_id` nullable integer FK → `contest.contest_id` with `ON DELETE SET NULL`; `class_id` nullable integer FK → `academic_class.class_id` with `ON DELETE SET NULL`; `language_id` integer required FK → `language.language_id`; `submitted_at` timezone-aware timestamp required, default current time; `status` varchar(50) required; `source_code` nullable text containing Base64-encoded source; `source_code_encoded` boolean required, default `true`; `score`, `passed_testcases`, `total_testcases`, `runtime_ms`, and `memory_kb` nullable integers. |
 
 The database stores problem statements and judging limits, while the
 `testcase` table stores private judge data. Problem access is controlled by
 `access_modifier`; application authorization determines who may read or edit
 private problem details and test cases.
+
+`source_code_encoded` records whether `source_code` is Base64-encoded so legacy
+rows can be decoded safely. Base64 is an encoding format, not encryption.
+`passed_testcases` and `total_testcases` record judging progress;
+`runtime_ms` is the summed runtime for testcases that did not time out, and
+`memory_kb` is the peak memory reported by Judge0. Metrics may be `NULL` for
+legacy submissions or when Judge0 does not report a measurement.
+
+`class_id` records the class context for a class submission. Public-practice
+submissions have no class context. Because legacy submissions may not have
+reliable class provenance, only submissions with a recorded `class_id` appear
+in class-scoped history.
 
 ### Contests and class assignments
 
@@ -228,6 +248,8 @@ copying its statement or test cases.
   optional (`created_by` can be `NULL`).
 - `account` 1 — many `submission`; the submitter link is optional so a
   submission can be retained without its account.
+- `academic_class` 1 — many `submission`; the class context is optional and is
+  set to `NULL` when its class is deleted.
 - `admin` many — many `academic_class` through `manage_class`.
 - `student` many — many `academic_class` through `student_class`; join requests
   are stored in `class_join_request`.
@@ -247,6 +269,9 @@ copying its statement or test cases.
   database alone.
 - The account deletion flow clears nullable owner/submitter references so
   problem, contest, and submission records can be preserved.
+- Source code for new submissions is stored as Base64 text; this does not
+  encrypt the code. The judge migration performs the one-time conversion of
+  older plain-text rows and preserves their encoding state.
 - Administrative deletion routes explicitly remove dependent test cases,
   solutions, submissions, and class/contest links as appropriate.
 - Run `PYTHONPATH=. .venv/bin/python db/initialize_tables.py` for missing

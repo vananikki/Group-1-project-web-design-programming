@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lịch sử bài nộp | Online Judge</title>
+    <link rel="stylesheet" href="../assets/css/styles.css?v=20261103b">
+</head>
+<body>
+    <main class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="../">
+                <span class="brand-mark" aria-hidden="true">OJ</span>
+                <span>Online Judge</span>
+            </a>
+            <div class="button-row">
+                <a href="problems.html">Kho bài tập</a>
+                <a href="index.html">Tài khoản</a>
+                <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
+            </div>
+        </header>
+
+        <section class="card dashboard-card">
+            <div class="dashboard-header">
+                <div>
+                    <p class="eyebrow">THEO DÕI KẾT QUẢ</p>
+                    <h1>Lịch sử bài nộp</h1>
+                    <p class="page-subtitle">Lọc theo mã bài tập hoặc mã tài khoản; mã nguồn chỉ bạn mới xem được.</p>
+                </div>
+            </div>
+            <form id="history-filter-form" class="history-filter-form">
+                <label>Mã bài tập (problem_id)
+                    <input name="problem_id" type="number" min="1" step="1" inputmode="numeric">
+                </label>
+                <label>Mã người nộp (account_id)
+                    <input name="account_id" type="number" min="1" step="1" inputmode="numeric">
+                </label>
+                <div class="button-row">
+                    <button type="submit">Lọc lịch sử</button>
+                    <a class="button-link secondary" href="submissions.html">Xóa bộ lọc</a>
+                </div>
+            </form>
+            <div id="submission-history-grid" class="submission-history-grid">
+                <section id="filtered-history-card" class="panel-block history-result-card" hidden>
+                    <div class="dashboard-header">
+                        <div>
+                            <h2 id="filtered-history-heading">Lịch sử đã lọc</h2>
+                            <p id="filtered-history-hint" class="field-hint"></p>
+                        </div>
+                    </div>
+                    <div id="filtered-submission-history" class="entity-list server-submission-list"></div>
+                    <button id="filtered-history-more" class="secondary" type="button" hidden>Tải bài nộp cũ hơn</button>
+                    <p id="filtered-history-message" class="message" role="alert"></p>
+                </section>
+                <section class="panel-block history-result-card" aria-labelledby="server-history-heading">
+                    <div class="dashboard-header">
+                        <div>
+                            <h2 id="server-history-heading">Bài nộp toàn server</h2>
+                            <p class="field-hint">Trạng thái bài public và private, không phụ thuộc bộ lọc phía trên.</p>
+                        </div>
+                    </div>
+                    <div id="server-submission-history" class="entity-list server-submission-list"></div>
+                    <button id="server-history-more" class="secondary" type="button" hidden>Tải bài nộp cũ hơn</button>
+                    <p id="server-history-message" class="message" role="alert"></p>
+                </section>
+            </div>
+        </section>
+    </main>
+    <script type="module" src="../assets/js/submissions.js?v=20261103b"></script>
+</body>
+</html>

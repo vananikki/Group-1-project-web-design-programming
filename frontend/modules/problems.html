@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kho bài tập | Online Judge</title>
-    <link rel="stylesheet" href="../assets/css/styles.css?v=20261102a">
+    <link rel="stylesheet" href="../assets/css/styles.css?v=20261103a">
 </head>
 <body>
     <main class="page-shell">
@@ -16,53 +16,42 @@
             <div class="button-row">
                 <a href="index.html">Tài khoản</a>
                 <a href="classroom.html">Lớp học</a>
+                <a href="submissions.html">Lịch sử bài nộp</a>
                 <a id="create-problem-link" class="button-link" href="create_problem.html" hidden>＋ Tạo bài tập</a>
                 <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
             </div>
         </header>
 
-        <section class="card dashboard-card">
+        <section class="card dashboard-card problem-bank-page">
             <div class="dashboard-header">
                 <div>
                     <p class="eyebrow">LUYỆN TẬP</p>
                     <h1>Kho bài tập</h1>
-                    <p class="page-subtitle">Các bài public có thể được mọi người xem và luyện tập.</p>
+                    <p class="page-subtitle">Chọn bài để mở trang đề và nộp lời giải.</p>
                 </div>
                 <a id="create-problem-main-link" class="button-link" href="create_problem.html" hidden>＋ Tạo bài tập</a>
             </div>
-            <section class="panel-block">
-                <h2>Bài tập public</h2>
-                <div id="public-problem-list" class="problem-list"></div>
-            </section>
-            <section class="panel-block">
-                <h2>Bài nộp toàn server</h2>
-                <p class="field-hint">Chỉ bạn xem được mã nguồn của mình.</p>
-                <div id="submission-history" class="entity-list"></div>
-                <button id="submission-history-more" class="secondary" type="button" hidden>Tải bài nộp cũ hơn</button>
-            </section>
-            <section id="owned-problems-panel" class="panel-block" hidden>
-                <h2>Bài tập của tôi</h2>
-                <p class="field-hint">Bài private chỉ được hiển thị trong lớp mà bạn đã thêm bài vào.</p>
-                <div id="owned-problem-list" class="problem-list"></div>
-            </section>
+            <div class="problem-bank-picker-layout">
+                <aside class="problem-picker panel-block" aria-label="Danh sách bài tập">
+                    <h2>Bài tập public</h2>
+                    <label class="problem-filter-label" for="problem-filter">Lọc bài tập</label>
+                    <input id="problem-filter" type="search" placeholder="Nhập tên hoặc mã bài..." autocomplete="off">
+                    <div id="public-problem-list" class="problem-picker-list"></div>
+                    <section id="owned-problems-panel" class="owned-problems-panel" hidden>
+                        <h2>Bài tập của tôi</h2>
+                        <div id="owned-problem-list" class="problem-picker-list"></div>
+                    </section>
+                </aside>
+                <section class="panel-block problem-bank-intro">
+                    <p class="eyebrow">LUYỆN TẬP</p>
+                    <h2>Chọn một bài tập</h2>
+                    <p class="page-subtitle">Đề bài và khung nộp lời giải sẽ mở ở trang riêng.</p>
+                    <a class="button-link secondary" href="submissions.html">Xem bài nộp toàn server</a>
+                </section>
+            </div>
             <p id="page-message" class="message" role="alert"></p>
         </section>
     </main>
-    <dialog id="solution-dialog" class="solution-dialog" aria-labelledby="solution-heading">
-        <form id="solution-form" class="stacked-form">
-            <div class="workspace-heading">
-                <div>
-                    <p class="eyebrow">LUYỆN TẬP BÀI PUBLIC</p>
-                    <h2 id="solution-heading">Bài tập</h2>
-                </div>
-                <button id="close-solution" class="secondary" type="button">Đóng</button>
-            </div>
-            <label>Ngôn ngữ lập trình<select id="solution-language" name="language_id" required></select></label>
-            <label>Mã nguồn<textarea name="source_code" rows="14" required maxlength="65536" spellcheck="false" placeholder="Viết lời giải của bạn..."></textarea></label>
-            <button type="submit">Nộp và chấm bài</button>
-            <p id="submission-result" class="message" role="status" aria-live="polite"></p>
-        </form>
-    </dialog>
-    <script type="module" src="../assets/js/problem_bank.js?v=20261102d"></script>
+    <script type="module" src="../assets/js/problem_bank.js?v=20261103a"></script>
 </body>
 </html>

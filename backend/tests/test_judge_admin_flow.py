@@ -817,6 +817,39 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
     ]
     assert submission_history.json()[0]["account_name"] == "other-history-student"
     assert all("source_code" not in item for item in submission_history.json())
+    public_problem_history = client.get(
+        f"/student/submissions?problem_id={public_problem_id}&limit=2",
+        cookies=student_cookies,
+    )
+    assert public_problem_history.status_code == 200, public_problem_history.text
+    assert len(public_problem_history.json()) == 2
+    assert all(
+        item["problem_id"] == public_problem_id
+        for item in public_problem_history.json()
+    )
+    other_account_history = client.get(
+        f"/student/submissions?account_id={other_student_id}",
+        cookies=student_cookies,
+    )
+    assert other_account_history.status_code == 200, other_account_history.text
+    assert len(other_account_history.json()) == 1
+    assert other_account_history.json()[0]["account_name"] == "other-history-student"
+    assert other_account_history.json()[0]["is_mine"] is False
+    combined_history = client.get(
+        f"/student/submissions?problem_id={public_problem_id}&account_id={other_student_id}",
+        cookies=student_cookies,
+    )
+    assert combined_history.status_code == 200, combined_history.text
+    assert len(combined_history.json()) == 1
+    assert combined_history.json()[0]["problem_id"] == public_problem_id
+    assert client.get(
+        "/student/submissions?problem_id=0",
+        cookies=student_cookies,
+    ).status_code == 422
+    assert client.get(
+        "/student/submissions?account_id=0",
+        cookies=student_cookies,
+    ).status_code == 422
     assert client.get("/student/submissions").status_code == 401
     other_history = client.get(
         "/student/submissions",

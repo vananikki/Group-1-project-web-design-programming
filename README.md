@@ -2,6 +2,9 @@
 
 This repository is a web-based Online Judge project built with a FastAPI backend and a static frontend. The project includes the working authentication and admin account flows, plus a newly added judge-management layer for admin-created problems, academic classes, and contests. The building approach keeps the earlier account system intact while extending the platform with a simplified Polygon-style workflow for educational classes and contest management.
 
+For the current screen-by-screen user flows, see [app.md](./app.md). For database
+tables, relationships, and submission storage details, see [database.md](./database.md).
+
 ---
 
 ## Current project status
@@ -24,7 +27,10 @@ The project is now extended beyond the original account-management layer. The ve
 - judge-admin frontend detail panels that query class and contest data directly from the backend
 - testcase editor and class roster controls in the judge-admin frontend
 - standings endpoint for contest performance tracking and out-of-contest interpretation
-- static frontend pages for login, register, account, admin management, and judge administration
+- Judge0-backed submission grading with stored verdict, score, testcase counts, runtime, and memory
+- paginated server-wide submission history and class-scoped submission history
+- reusable submission-history page filterable by problem and account IDs
+- static frontend pages for authentication, account, problem practice/submission, classes, and administration
 
 The codebase also includes phase-based database model files for future expansion:
 
@@ -32,7 +38,9 @@ The codebase also includes phase-based database model files for future expansion
 - `backend/db/tables_phase2.py` for the problem, contest, solution, submission, and language model layer
 - `backend/db/tables_phase3.py` as a compatibility export for the shared `Language` table definition
 
-These models are intentionally separated to make the project easier to evolve without mixing the current working auth layer with future judge features.
+These models are intentionally separated to make the project easier to evolve
+without mixing the auth layer with judge features. Frontend routes and user
+journeys are documented in [app.md](./app.md).
 
 ---
 
@@ -75,7 +83,9 @@ The current backend is responsible for:
 
 Authenticated users can view a paginated server-wide submission feed, including private-problem submission statuses. Source code is only returned by an ownership-checked endpoint for the submitter. Class submission history is scoped to submissions made through that class and is visible only to enrolled students.
 
-Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. They can also practice public problems from the problem bank without joining a class. Administrators create problems in their own library from a separate editor; only the owner (or a super admin) can view and edit a problem's test cases. Public problems appear in the shared practice library, while private problems are only visible to students through classes where they have been assigned. Class administrators approve enrollment requests and manage class-specific administrator permissions. Class owners can search active administrator accounts by name or email and invite them to a class. Class ownership reuses the existing `manage_class` relation; the first administrator assigned to a class is its owner. Only administrators assigned to a class can access it, and only its owner (the primary administrator) can review student join requests. Requests remain pending until the owner approves or rejects them. A new `class_join_request` table records approval requests. Submissions are executed by the configured Judge0 service, never by the web server. The upgrade migration creates missing model tables and adds the contest and source-code fields to an existing `submission` table.
+Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. They can also practice public problems without joining a class. The problem bank links to a dedicated two-column submission page: statement on the left and code editor on the right. Submission history has its own page, filterable with `problem_id` and/or `account_id` query parameters; when filtered, the matching results and a separate unfiltered server-wide feed are shown side by side on wide screens. On smaller screens the cards stack vertically.
+
+Administrators create problems in their own library from a separate editor; only the owner (or a super admin) can view and edit a problem's test cases. Public problems appear in the shared practice library, while private problems are only visible to students through classes where they have been assigned. Class administrators approve enrollment requests and manage class-specific administrator permissions. Class owners can search active administrator accounts by name or email and invite them to a class. Class ownership reuses the existing `manage_class` relation; the first administrator assigned to a class is its owner. Only administrators assigned to a class can access it, and only its owner (the primary administrator) can review student join requests. Requests remain pending until the owner approves or rejects them. A new `class_join_request` table records approval requests. Submissions are executed by the configured Judge0 service, never by the web server.
 
 ---
 
@@ -102,6 +112,8 @@ Super admins can also delete classes, contests, and individual submissions. Dele
 To enable code submissions, run a Judge0 instance, set `JUDGE0_URL` in the backend environment, and sync its language list with `PYTHONPATH=. .venv/bin/python db/initialize_languages.py`. Source code is stored in the database as Base64 text; this is an encoding, not encryption. The judge migration converts existing plain-text submissions once and records their encoding state to avoid double conversion. Each submission stores its status, score, passed/total testcase counts, summed runtime for non-time-limit-exceeded testcases, and peak reported memory. Judge0 runtime is reported in seconds and converted to milliseconds; memory is reported in KB. The UI reports a service error when Judge0 is not reachable; submitted source code is never executed in the FastAPI process.
 
 ### 2) Frontend
+
+The key frontend routes and query parameters are documented in [app.md](./app.md).
 
 ```bash
 cd frontend
@@ -165,10 +177,16 @@ online-judge-0/
 │   │   ├── activate.html
 │   │   ├── forgot-password.html
 │   │   ├── index.html
+│   │   ├── problems.html
+│   │   ├── problem_submit.html
+│   │   ├── submissions.html
+│   │   ├── classroom.html
 │   │   └── manage_accounts.html
 │   └── assets/
 │       ├── css/styles.css
 │       └── js/
+├── app.md
+├── database.md
 └── .gitignore
 ```
 
@@ -194,7 +212,7 @@ This includes the user and access layer such as:
 
 This module is the active basis for authentication and account management.
 
-### Phase 2: judge and contest model layer
+### Phase 2: active judge and contest model layer
 
 Defined in `backend/db/tables_phase2.py`.
 
@@ -211,7 +229,7 @@ This includes the next planned entities:
 - `Language`
 - `AccessModifier`
 
-The `submission` table stores source code for new student submissions. The migration adds this nullable column for existing databases so previously stored submissions remain valid.
+The `submission` table stores Base64-encoded source for new submissions, an encoding flag, the class context when applicable, and grading metrics. See [database.md](./database.md) for the full column and nullability reference. Base64 is encoding, not encryption.
 
 The refined design links the database as follows:
 
@@ -225,7 +243,9 @@ The refined design links the database as follows:
 - `AcademicClass` N — N `Problem` through `AcademicClassProblem`
 - `AcademicClass` N — N `Contest` through `AcademicClassContest`
 
-These models are used by the current problem, testcase, submission, and contest administration routes. Automated code execution is not yet implemented.
+These models are used by the current problem, testcase, submission, and contest
+administration routes. Submissions are evaluated by the configured Judge0
+service.
 
 ### Phase 3: language registry
 
@@ -345,28 +365,31 @@ The main backend routes currently cover:
 | `GET` | `/student/classes/{class_id}` | View class problems and contests after approval |
 | `GET` | `/student/classes/{class_id}/contests/{contest_id}` | View contest problems and eligibility window |
 | `GET` | `/student/classes/{class_id}/contests/{contest_id}/standings` | View live standings |
-| `GET` | `/student/submissions` | View paginated server-wide statuses; source code is omitted |
+| `GET` | `/student/submissions` | View paginated server-wide statuses; supports `problem_id` and `account_id` filters; source code is omitted |
 | `GET` | `/student/submissions/{submission_id}/source` | View source code only when the caller owns the submission |
 | `GET` | `/student/classes/{class_id}/submissions` | View paginated submissions made in a joined class |
 | `GET` | `/student/languages` | List configured Judge0 languages |
 | `POST` | `/student/classes/{class_id}/problems/{problem_id}/submissions` | Submit source code to Judge0 and save the result |
 
+The reusable submission-history page is `frontend/modules/submissions.html`. Its query
+parameters are `problem_id` and `account_id`; either or both can be supplied. The page
+also keeps a separate, unfiltered server-wide history card. The UI flow and examples are
+in [app.md](./app.md).
+
 ---
 
 ## Future roadmap
 
-The project is designed to expand toward:
-
-- submission workflow
-- Judge0-based compile and run execution
-- richer contest scheduling and management tools
-
-Automated submission evaluation and execution remain future work.
+The project can continue to expand with richer contest scheduling and management tools,
+but submission evaluation and execution through Judge0 are implemented.
 
 ---
 
 ## Documentation policy
 
-Whenever the project behavior, setup, architecture, endpoints, database models, or user flows change, the documentation in this README must also be updated to match the current state of the code.
+Whenever project behavior, setup, architecture, endpoints, database models, or
+user flows change, update the relevant documentation: this README for
+project/setup/API overview, [database.md](./database.md) for persistence/schema,
+and [app.md](./app.md) for frontend navigation and user flows.
 
 This helps keep the project description accurate and prevents the documentation from drifting away from the implementation.

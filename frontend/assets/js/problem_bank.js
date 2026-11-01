@@ -1,36 +1,14 @@
 import { apiFetch, readResponse } from "./api.js?v=20261029a";
-import { typesetMath } from "./latex.js?v=20261101b";
-import { renderSubmissionHistory } from "./submission_history.js?v=20261102a";
 
 const publicList = document.getElementById("public-problem-list");
 const ownedList = document.getElementById("owned-problem-list");
 const pageMessage = document.getElementById("page-message");
-const solutionDialog = document.getElementById("solution-dialog");
-const solutionForm = document.getElementById("solution-form");
+const publicProblems = [];
+let ownedProblems = [];
 let account;
-let activeProblemId;
-let languagesPromise;
-const historyPageSize = 50;
-let historyOffset = 0;
 
-function escapeHtml(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (character) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        "\"": "&quot;",
-        "'": "&#39;",
-    })[character]);
-}
-
-function setMessage(element, text, isError = false) {
-    element.textContent = text;
-    element.classList.toggle("error", isError);
-    element.classList.toggle("success", !isError && Boolean(text));
-}
-
-async function requestJson(path, options) {
-    const response = await apiFetch(path, options);
+async function requestJson(path) {
+    const response = await apiFetch(path);
     const data = await readResponse(response);
     if (!response.ok) {
         throw new Error(data.detail || `Yêu cầu thất bại (${response.status})`);
@@ -38,66 +16,50 @@ async function requestJson(path, options) {
     return data;
 }
 
-function problemCard(problem, { canEdit = false, isPublic = false } = {}) {
-    const isPublicProblem = isPublic || problem.access_modifier === "public";
-    const visibility = isPublicProblem ? "Public" : "Private";
-    const source = canEdit ? "owner" : "public";
-    return `<article class="problem-card">
-        <div>
-            <p class="class-card-kicker">BÀI TẬP · #${escapeHtml(problem.problem_id)} · ${visibility.toUpperCase()}</p>
-            <h4>${escapeHtml(problem.problem_name)}</h4>
-            ${problem.description?.trim() ? `<p>${escapeHtml(problem.description)}</p>` : ""}
-        </div>
-        <div class="button-row">
-            <a class="button-link secondary" href="problem_statement.html?problem_id=${encodeURIComponent(problem.problem_id)}&source=${source}">Xem đề bài</a>
-            ${isPublicProblem ? `<button type="button" data-solve-problem="${escapeHtml(problem.problem_id)}">Luyện tập</button>` : ""}
-            ${canEdit ? `<a class="button-link secondary" href="create_problem.html?problem_id=${encodeURIComponent(problem.problem_id)}">Sửa bài</a>` : ""}
-        </div>
-    </article>`;
-}
+function renderProblemPicker(element, problems, { isPublic = false, query = "" } = {}) {
+    const normalizedQuery = query.toLocaleLowerCase();
+    const filtered = problems.filter((problem) =>
+        `${problem.problem_name} ${problem.problem_id}`
+            .toLocaleLowerCase()
+            .includes(normalizedQuery)
+    );
+    element.replaceChildren();
+    if (!filtered.length) {
+        const empty = document.createElement("p");
+        empty.className = "field-hint";
+        empty.textContent = query ? "Không tìm thấy bài phù hợp." : "Chưa có bài tập nào.";
+        element.append(empty);
+        return;
+    }
 
-function renderList(element, problems, options = {}) {
-    element.innerHTML = problems.length
-        ? problems.map((problem) => problemCard(problem, options)).join("")
-        : `<div class="empty-state"><p>${escapeHtml(options.emptyText)}</p></div>`;
-    typesetMath(element).catch((error) => {
-        console.error(error);
-        setMessage(pageMessage, error.message || "Không thể hiển thị công thức LaTeX.", true);
-    });
-}
+    for (const problem of filtered) {
+        const row = document.createElement("div");
+        row.className = "problem-picker-row";
+        const open = document.createElement("a");
+        const params = new URLSearchParams({
+            problem_id: String(problem.problem_id),
+            source: isPublic ? "public" : "owner",
+        });
+        open.className = "problem-picker-item";
+        open.href = `problem_submit.html?${params}`;
+        open.textContent = problem.problem_name;
+        row.append(open);
 
-async function loadLanguages() {
-    languagesPromise ??= requestJson("/student/languages");
-    const languages = await languagesPromise;
-    const selector = document.getElementById("solution-language");
-    selector.innerHTML = languages.map((language) =>
-        `<option value="${language.language_id}">${escapeHtml(language.name)}</option>`
-    ).join("");
-    if (!languages.length) {
-        throw new Error("Chưa có ngôn ngữ chấm bài. Hãy đồng bộ danh sách Judge0 languages trước.");
+        if (!isPublic && problem.created_by === account.account_id) {
+            const edit = document.createElement("a");
+            edit.className = "problem-picker-edit";
+            edit.href = `create_problem.html?problem_id=${encodeURIComponent(problem.problem_id)}`;
+            edit.textContent = "Sửa";
+            edit.setAttribute("aria-label", `Sửa ${problem.problem_name}`);
+            row.append(edit);
+        }
+        element.append(row);
     }
 }
 
-async function loadSubmissionHistory({ append = false } = {}) {
-    const offset = append ? historyOffset : 0;
-    const history = await requestJson(
-        `/student/submissions?limit=${historyPageSize}&offset=${offset}`,
-    );
-    const list = document.getElementById("submission-history");
-    renderSubmissionHistory(list, history, { append });
-    historyOffset = offset + history.length;
-    document.getElementById("submission-history-more").hidden =
-        history.length < historyPageSize;
-}
-
-async function openProblem(problemId, button) {
-    activeProblemId = Number(problemId);
-    document.getElementById("solution-heading").textContent =
-        button.closest(".problem-card").querySelector("h4").textContent;
-    solutionForm.elements.source_code.value = "";
-    setMessage(document.getElementById("submission-result"), "");
-    await loadLanguages();
-    solutionDialog.showModal();
+function setMessage(text) {
+    pageMessage.textContent = text;
+    pageMessage.classList.add("error");
 }
 
 async function initialize() {
@@ -108,122 +70,48 @@ async function initialize() {
             return;
         }
         account = await accountResponse.json();
-        const publicProblems = await requestJson("/student/problems");
-        renderList(publicList, publicProblems, {
-            isPublic: true,
-            emptyText: "Chưa có bài tập public nào.",
-        });
-        try {
-            await loadSubmissionHistory();
-        } catch (error) {
-            console.error(error);
-            setMessage(pageMessage, error.message || "Không thể tải lịch sử nộp bài.", true);
-        }
+        const problems = await requestJson("/student/problems");
+        publicProblems.push(...problems);
+        renderProblemPicker(publicList, publicProblems, { isPublic: true });
+
         if (account.role === "ADMIN" || account.role === "SUPER_ADMIN") {
             document.getElementById("create-problem-link").hidden = false;
             document.getElementById("create-problem-main-link").hidden = false;
             document.getElementById("owned-problems-panel").hidden = false;
-            const problems = await requestJson("/admin/judge/problems");
-            const ownedProblems = problems.filter((problem) =>
-                problem.created_by === account.account_id
+            ownedProblems = await requestJson("/admin/judge/problems");
+            renderProblemPicker(
+                ownedList,
+                ownedProblems.filter((problem) => problem.created_by === account.account_id),
             );
-            renderList(ownedList, ownedProblems, {
-                canEdit: true,
-                emptyText: "Bạn chưa tạo bài tập nào.",
-            });
         }
     } catch (error) {
         console.error(error);
-        setMessage(pageMessage, error.message || "Không thể tải kho bài tập.", true);
+        setMessage(error instanceof Error ? error.message : "Không thể tải kho bài tập.");
     }
 }
 
-document.body.addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-solve-problem]");
-    if (!button) {
-        return;
-    }
-    button.disabled = true;
-    try {
-        await openProblem(button.dataset.solveProblem, button);
-    } catch (error) {
-        console.error(error);
-        setMessage(pageMessage, error.message || "Không thể mở bài tập.", true);
-    } finally {
-        button.disabled = false;
-    }
-});
-
-document.getElementById("close-solution").addEventListener("click", () => {
-    solutionDialog.close();
-});
-
-solutionDialog.addEventListener("click", (event) => {
-    if (event.target === event.currentTarget) {
-        solutionDialog.close();
-    }
-});
-
-solutionForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = solutionForm.querySelector('[type="submit"]');
-    const resultElement = document.getElementById("submission-result");
-    const values = new FormData(solutionForm);
-    button.disabled = true;
-    setMessage(resultElement, "Đang gửi lời giải tới hệ thống chấm bài...");
-    try {
-        const result = await requestJson(
-            `/student/problems/${activeProblemId}/submissions`,
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    language_id: Number(values.get("language_id")),
-                    source_code: values.get("source_code"),
-                }),
-            },
+document.getElementById("problem-filter").addEventListener("input", (event) => {
+    const query = event.currentTarget.value.trim();
+    renderProblemPicker(publicList, publicProblems, { isPublic: true, query });
+    if (!document.getElementById("owned-problems-panel").hidden) {
+        renderProblemPicker(
+            ownedList,
+            ownedProblems.filter((problem) => problem.created_by === account.account_id),
+            { query },
         );
-        setMessage(
-            resultElement,
-            `${result.status} · ${result.score} điểm · ${result.passed_testcases}/${result.total_testcases} test case · tổng ${result.runtime_ms == null ? "—" : `${result.runtime_ms} ms`} · bộ nhớ đỉnh ${result.memory_kb == null ? "—" : `${result.memory_kb} KB`}`,
-            result.status !== "Accepted",
-        );
-        try {
-            await loadSubmissionHistory();
-        } catch (error) {
-            console.error(error);
-            setMessage(pageMessage, error.message || "Đã chấm bài nhưng không thể tải lại lịch sử.", true);
-        }
-    } catch (error) {
-        setMessage(resultElement, error.message || "Không thể chấm lời giải.", true);
-    } finally {
-        button.disabled = false;
-    }
-});
-
-document.getElementById("submission-history-more").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-        await loadSubmissionHistory({ append: true });
-    } catch (error) {
-        console.error(error);
-        setMessage(pageMessage, error.message || "Không thể tải thêm lịch sử nộp bài.", true);
-    } finally {
-        button.disabled = false;
     }
 });
 
 document.getElementById("logout-button").addEventListener("click", async () => {
     try {
         const response = await apiFetch("/auth/logout", { method: "POST" });
-        if (response.ok) {
-            window.location.replace("login.html");
-        } else {
+        if (!response.ok) {
             throw new Error(`Không thể đăng xuất (${response.status}).`);
         }
+        window.location.replace("login.html");
     } catch (error) {
-        setMessage(pageMessage, error.message || "Không thể kết nối đến server.", true);
+        console.error(error);
+        setMessage(error instanceof Error ? error.message : "Không thể đăng xuất.");
     }
 });
 

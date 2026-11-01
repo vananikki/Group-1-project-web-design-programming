@@ -1329,10 +1329,17 @@ def list_public_problems(
 def list_student_submission_history(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    problem_id: int | None = Query(default=None, ge=1),
+    account_id: int | None = Query(default=None, ge=1),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
     account = _require_authenticated_account(session_id, session)
+    filters = []
+    if problem_id is not None:
+        filters.append(Submission.problem_id == problem_id)
+    if account_id is not None:
+        filters.append(Submission.account_id == account_id)
     rows = session.execute(
         select(
             Submission,
@@ -1344,6 +1351,7 @@ def list_student_submission_history(
         .join(Problem, Problem.problem_id == Submission.problem_id)
         .outerjoin(Contest, Contest.contest_id == Submission.contest_id)
         .outerjoin(Account, Account.account_id == Submission.account_id)
+        .where(*filters)
         .order_by(Submission.submitted_at.desc(), Submission.submission_id.desc())
         .limit(limit)
         .offset(offset)
