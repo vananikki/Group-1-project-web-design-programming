@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from db.schemas import AccountRoleUpdateIn
@@ -14,6 +14,7 @@ from db.tables_phase1 import (
     Session as UserSession,
     StudentClass,
 )
+from db.tables_phase2 import Contest, Problem, Submission
 
 router = APIRouter(prefix="/admin/accounts", tags=["account management"])
 
@@ -161,13 +162,13 @@ def delete_account(
     if target_account is None:
         raise HTTPException(status_code=404, detail="Tài khoản không tồn tại")
 
-    if acting_account.role == AccountRole.SUPER_ADMIN:
-        if target_account.account_id == acting_account.account_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Super admin không thể tự xóa tài khoản của mình",
-            )
+    if target_account.account_id == acting_account.account_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Không thể tự xóa tài khoản của mình",
+        )
 
+    if acting_account.role == AccountRole.SUPER_ADMIN:
         if target_account.role == AccountRole.SUPER_ADMIN:
             super_admin_count = session.scalar(
                 select(func.count())
@@ -204,6 +205,21 @@ def delete_account(
 
     session.execute(
         delete(UserSession).where(UserSession.account_id == target_account.account_id)
+    )
+    session.execute(
+        update(Problem)
+        .where(Problem.created_by == target_account.account_id)
+        .values(created_by=None)
+    )
+    session.execute(
+        update(Contest)
+        .where(Contest.created_by == target_account.account_id)
+        .values(created_by=None)
+    )
+    session.execute(
+        update(Submission)
+        .where(Submission.account_id == target_account.account_id)
+        .values(account_id=None)
     )
     session.delete(target_account)
     session.commit()

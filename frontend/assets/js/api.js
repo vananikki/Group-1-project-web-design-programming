@@ -18,11 +18,9 @@ function resolveApiBaseUrl() {
         return "http://127.0.0.1:8000";
     }
 
-    if (hostname === "100.73.218.40" || hostname === "172.17.22.24" || hostname.startsWith("192.168.")) {
-        return `http://${hostname}:8000`;
-    }
-
-    return origin.replace(/:\d+$/, ":8000");
+    const apiHostname = hostname.replace(/^\[|\]$/g, "");
+    const formattedHostname = apiHostname.includes(":") ? `[${apiHostname}]` : apiHostname;
+    return `${window.location.protocol}//${formattedHostname}:8000`;
 }
 
 const configuredApiBaseUrl = resolveApiBaseUrl();

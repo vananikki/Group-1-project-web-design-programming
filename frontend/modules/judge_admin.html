@@ -15,6 +15,8 @@
             </a>
             <div class="button-row">
                 <a href="index.html">Tài khoản</a>
+                <a href="problems.html">Kho bài tập</a>
+                <a href="create_problem.html">Tạo bài tập</a>
                 <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
             </div>
         </header>
@@ -106,6 +108,16 @@
                     <p id="contest-message" class="message" role="status"></p>
                     <ul id="contest-list" class="entity-list"></ul>
                 </div>
+                <div class="panel-block" id="submission-management" hidden>
+                    <h2>Quản lý bài nộp</h2>
+                    <p class="field-hint">SUPER_ADMIN có thể xóa bài nộp riêng lẻ. Danh sách hiển thị tối đa 500 bài gần nhất.</p>
+                    <form id="submission-search-form" class="stacked-form">
+                        <label>Tìm bài nộp theo ID<input name="submission_id" type="number" min="1"></label>
+                        <button type="submit">Tìm</button>
+                    </form>
+                    <p id="submission-message" class="message" role="status"></p>
+                    <ul id="submission-list" class="entity-list"></ul>
+                </div>
             </div>
 
             <div class="stacked-panel-grid">
@@ -176,6 +188,6 @@
             </div>
         </section>
     </main>
-    <script type="module" src="../assets/js/judge_admin.js?v=20261021b"></script>
+    <script type="module" src="../assets/js/judge_admin.js?v=20261101b"></script>
 </body>
 </html>

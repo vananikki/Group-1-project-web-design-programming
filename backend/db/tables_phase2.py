@@ -201,6 +201,11 @@ class Problem(Base):
         nullable=True,
     )
 
+    data_constraints: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     time_limit: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -211,9 +216,9 @@ class Problem(Base):
         nullable=False,
     )
 
-    created_by: Mapped[int] = mapped_column(
+    created_by: Mapped[int | None] = mapped_column(
         ForeignKey("account.account_id"),
-        nullable=False,
+        nullable=True,
     )
 
     created_at: Mapped[DateTime] = mapped_column(
@@ -235,7 +240,7 @@ class Problem(Base):
         server_default=text("'private'"),
     )
 
-    creator: Mapped["Account"] = relationship(
+    creator: Mapped["Account | None"] = relationship(
         "Account",
         foreign_keys=[created_by],
         back_populates="created_problems",
@@ -309,9 +314,9 @@ class Contest(Base):
         nullable=False,
     )
 
-    created_by: Mapped[int] = mapped_column(
+    created_by: Mapped[int | None] = mapped_column(
         ForeignKey("account.account_id"),
-        nullable=False,
+        nullable=True,
     )
 
     created_at: Mapped[DateTime] = mapped_column(
@@ -320,7 +325,7 @@ class Contest(Base):
         nullable=False,
     )
 
-    creator: Mapped["Account"] = relationship(
+    creator: Mapped["Account | None"] = relationship(
         "Account",
         foreign_keys=[created_by],
         back_populates="created_contests",
@@ -674,9 +679,9 @@ class Submission(Base):
         nullable=False,
     )
 
-    account_id: Mapped[int] = mapped_column(
+    account_id: Mapped[int | None] = mapped_column(
         ForeignKey("account.account_id"),
-        nullable=False,
+        nullable=True,
     )
 
     contest_id: Mapped[int | None] = mapped_column(
@@ -725,7 +730,7 @@ class Submission(Base):
         back_populates="submissions",
     )
 
-    account: Mapped["Account"] = relationship(
+    account: Mapped["Account | None"] = relationship(
         "Account",
         back_populates="submissions",
     )

@@ -140,6 +140,7 @@ class ProblemCreateIn(JudgeRequest):
     description: str | None = None
     input_description: str | None = None
     output_description: str | None = None
+    data_constraints: str | None = None
     time_limit: int = Field(ge=1, le=10)
     memory_limit: int = Field(ge=64, le=1024)
     access_modifier: Literal["private", "public"] = "private"
@@ -159,6 +160,7 @@ class ProblemUpdateIn(JudgeRequest):
     description: str | None = None
     input_description: str | None = None
     output_description: str | None = None
+    data_constraints: str | None = None
     time_limit: int | None = Field(default=None, ge=1, le=10)
     memory_limit: int | None = Field(default=None, ge=64, le=1024)
     access_modifier: Literal["private", "public"] | None = None

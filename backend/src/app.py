@@ -46,7 +46,14 @@ app = FastAPI(title="Online Judge")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_allowed_origins(),
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|100\.73\.218\.40|172\.17\..+)(?::\d+)?$",
+    allow_origin_regex=(
+        r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0"
+        r"|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}"
+        r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}"
+        r"|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}"
+        r"|\[(?:::1|f[cd][0-9a-fA-F:]*|fe[89ab][0-9a-fA-F:]*)\])"
+        r"(?::\d+)?$"
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

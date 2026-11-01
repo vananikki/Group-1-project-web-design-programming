@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js?v=20261021b";
+import { apiFetch, readResponse } from "./api.js?v=20261029a";
 
 const problemForm = document.getElementById("problem-form");
 const problemEditForm = document.getElementById("problem-edit-form");
@@ -22,13 +22,16 @@ const messages = {
     contestProblem: document.getElementById("contest-problem-message"),
     classDetail: document.getElementById("class-detail-message"),
     contestDetail: document.getElementById("contest-detail-message"),
+    submission: document.getElementById("submission-message"),
 };
 
 const lists = {
     problem: document.getElementById("problem-list"),
     class: document.getElementById("class-list"),
     contest: document.getElementById("contest-list"),
+    submission: document.getElementById("submission-list"),
 };
+let currentAccountRole;
 
 async function ensureAdminAccess() {
     const response = await apiFetch("/auth/me");
@@ -37,6 +40,9 @@ async function ensureAdminAccess() {
         return false;
     }
     const account = await response.json();
+    currentAccountRole = account.role;
+    document.getElementById("submission-management").hidden =
+        account.role !== "SUPER_ADMIN";
     if (account.role !== "ADMIN" && account.role !== "SUPER_ADMIN") {
         window.location.replace("index.html");
         return false;
@@ -125,8 +131,45 @@ async function loadProblems() {
         setMessage("problem", data.detail || "Không thể tải problem", true);
         return;
     }
-    renderList(lists.problem, data, (problem) => `<strong>#${escapeHtml(problem.problem_id)}</strong> ${escapeHtml(problem.problem_name)} <span>(${escapeHtml(problem.access_modifier)})</span>`);
+    renderList(lists.problem, data, (problem) => {
+        const anonymousTag = problem.is_anonymous
+            ? ' <span class="status-badge">Ẩn danh</span>'
+            : "";
+        const deleteButton = currentAccountRole === "SUPER_ADMIN"
+            ? ` <button type="button" class="secondary" data-delete-problem="${escapeHtml(problem.problem_id)}">Xóa</button>`
+            : "";
+        return `<strong>#${escapeHtml(problem.problem_id)}</strong> ${escapeHtml(problem.problem_name)} <span>(${escapeHtml(problem.access_modifier)})</span>${anonymousTag}${deleteButton}`;
+    });
 }
+
+lists.problem.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-delete-problem]");
+    if (!button || currentAccountRole !== "SUPER_ADMIN") {
+        return;
+    }
+
+    const problemId = button.dataset.deleteProblem;
+    if (!window.confirm(`Xóa problem #${problemId} cùng test case, lời giải, liên kết lớp/contest và toàn bộ bài nộp?`)) {
+        return;
+    }
+
+    button.disabled = true;
+    try {
+        const response = await apiFetch(`/admin/judge/problems/${problemId}`, {
+            method: "DELETE",
+        });
+        const data = await readResponse(response);
+        if (!response.ok) {
+            throw new Error(data.detail || `Không thể xóa problem (${response.status})`);
+        }
+        setMessage("problem", `Đã xóa problem #${problemId}`);
+        await loadProblems();
+    } catch (error) {
+        console.error(error);
+        setMessage("problem", error.message || "Không thể xóa problem", true);
+        button.disabled = false;
+    }
+});
 
 async function loadClasses() {
     const response = await apiFetch("/admin/judge/academic-classes");
@@ -135,7 +178,12 @@ async function loadClasses() {
         setMessage("class", data.detail || "Không thể tải lớp học", true);
         return;
     }
-    renderList(lists.class, data, (item) => `<strong>#${escapeHtml(item.class_id)}</strong> ${escapeHtml(item.class_name)}`);
+    renderList(lists.class, data, (item) => {
+        const deleteButton = currentAccountRole === "SUPER_ADMIN"
+            ? ` <button type="button" class="secondary" data-delete-class="${escapeHtml(item.class_id)}">Xóa</button>`
+            : "";
+        return `<strong>#${escapeHtml(item.class_id)}</strong> ${escapeHtml(item.class_name)}${deleteButton}`;
+    });
 }
 
 async function loadContests() {
@@ -145,8 +193,94 @@ async function loadContests() {
         setMessage("contest", data.detail || "Không thể tải contest", true);
         return;
     }
-    renderList(lists.contest, data, (item) => `<strong>#${escapeHtml(item.contest_id)}</strong> ${escapeHtml(item.contest_name)} <span>(${escapeHtml(item.status)})</span>`);
+    renderList(lists.contest, data, (item) => {
+        const deleteButton = currentAccountRole === "SUPER_ADMIN"
+            ? ` <button type="button" class="secondary" data-delete-contest="${escapeHtml(item.contest_id)}">Xóa</button>`
+            : "";
+        return `<strong>#${escapeHtml(item.contest_id)}</strong> ${escapeHtml(item.contest_name)} <span>(${escapeHtml(item.status)})</span>${deleteButton}`;
+    });
 }
+
+async function loadSubmissions(submissionId = "") {
+    const query = submissionId ? `?submission_id=${encodeURIComponent(submissionId)}` : "";
+    const response = await apiFetch(`/admin/judge/submissions${query}`);
+    const data = await readResponse(response);
+    if (!response.ok) {
+        setMessage("submission", data.detail || "Không thể tải bài nộp", true);
+        return;
+    }
+    renderList(lists.submission, data, (submission) =>
+        `<strong>#${escapeHtml(submission.submission_id)}</strong> ${escapeHtml(submission.problem_name)} · ${escapeHtml(submission.account_name)} · ${escapeHtml(submission.status)} <button type="button" class="secondary" data-delete-submission="${escapeHtml(submission.submission_id)}">Xóa</button>`,
+    );
+}
+
+document.getElementById("submission-search-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submissionId = event.currentTarget.elements.submission_id.value.trim();
+    await loadSubmissions(submissionId);
+});
+
+async function deleteManagedEntity({ button, path, label, confirmMessage, reload, messageKey }) {
+    if (!window.confirm(confirmMessage)) {
+        return;
+    }
+    button.disabled = true;
+    try {
+        const response = await apiFetch(path, { method: "DELETE" });
+        const data = await readResponse(response);
+        if (!response.ok) {
+            throw new Error(data.detail || `Không thể xóa ${label} (${response.status})`);
+        }
+        setMessage(messageKey, `Đã xóa ${label}`);
+        await reload();
+    } catch (error) {
+        console.error(error);
+        setMessage(messageKey, error.message || `Không thể xóa ${label}`, true);
+        button.disabled = false;
+    }
+}
+
+lists.class.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-delete-class]");
+    if (!button || currentAccountRole !== "SUPER_ADMIN") return;
+    const classId = button.dataset.deleteClass;
+    void deleteManagedEntity({
+        button,
+        path: `/admin/judge/academic-classes/${classId}`,
+        label: `lớp #${classId}`,
+        confirmMessage: `Xóa lớp #${classId}, thành viên, yêu cầu tham gia và liên kết bài/contest? Bài tập và contest gốc sẽ được giữ lại.`,
+        reload: loadClasses,
+        messageKey: "class",
+    });
+});
+
+lists.contest.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-delete-contest]");
+    if (!button || currentAccountRole !== "SUPER_ADMIN") return;
+    const contestId = button.dataset.deleteContest;
+    void deleteManagedEntity({
+        button,
+        path: `/admin/judge/contests/${contestId}`,
+        label: `contest #${contestId}`,
+        confirmMessage: `Xóa contest #${contestId}, liên kết lớp, danh sách bài và toàn bộ bài nộp thuộc contest? Bài tập gốc sẽ được giữ lại.`,
+        reload: loadContests,
+        messageKey: "contest",
+    });
+});
+
+lists.submission.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-delete-submission]");
+    if (!button || currentAccountRole !== "SUPER_ADMIN") return;
+    const submissionId = button.dataset.deleteSubmission;
+    void deleteManagedEntity({
+        button,
+        path: `/admin/judge/submissions/${submissionId}`,
+        label: `bài nộp #${submissionId}`,
+        confirmMessage: `Xóa vĩnh viễn bài nộp #${submissionId}?`,
+        reload: loadSubmissions,
+        messageKey: "submission",
+    });
+});
 
 problemForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -513,6 +647,9 @@ async function init() {
         return;
     }
     await Promise.all([loadProblems(), loadClasses(), loadContests()]);
+    if (currentAccountRole === "SUPER_ADMIN") {
+        await loadSubmissions();
+    }
 }
 
 init();

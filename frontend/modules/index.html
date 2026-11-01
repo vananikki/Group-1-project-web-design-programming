@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Online Judge</title>
-    <link rel="stylesheet" href="../assets/css/styles.css">
+    <link rel="stylesheet" href="../assets/css/styles.css?v=20261101m">
 </head>
 <body>
     <main class="page-shell">
@@ -26,10 +26,6 @@
                     <h1 id="account-heading">Thông tin tài khoản</h1>
                     <p class="page-subtitle">Xem và cập nhật hồ sơ cá nhân của bạn.</p>
                 </div>
-            </div>
-
-            <div class="button-row" style="margin-bottom: 18px;">
-                <a href="classroom.html" class="button-link">Mở lớp học</a>
             </div>
 
             <dl class="profile-grid">
@@ -65,12 +61,34 @@
                 <button id="edit-name-button" type="button">Sửa tên</button>
                 <button id="save-name-button" type="button" hidden>Lưu thay đổi</button>
                 <button id="cancel-name-button" class="secondary" type="button" hidden>Hủy</button>
-                <button id="delete-account-button" class="secondary" type="button">Xóa tài khoản</button>
             </div>
             <p id="profile-message" class="message" role="status"></p>
             <p id="logout-error" class="message" role="alert"></p>
         </section>
+        <nav class="dashboard-shortcuts" aria-label="Điều hướng nhanh">
+            <a class="dashboard-shortcut" href="classroom.html">
+                <span class="dashboard-shortcut-icon" aria-hidden="true">▤</span>
+                <span><strong>Lớp học</strong><small>Quản lý lớp hoặc mở lớp đang tham gia</small></span>
+                <span class="dashboard-shortcut-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="dashboard-shortcut" href="problems.html">
+                <span class="dashboard-shortcut-icon" aria-hidden="true">⌕</span>
+                <span><strong>Kho bài tập</strong><small>Xem bài public và luyện tập</small></span>
+                <span class="dashboard-shortcut-arrow" aria-hidden="true">→</span>
+            </a>
+        </nav>
+        <section id="admin-problem-tools" class="card dashboard-card admin-problem-shortcut" hidden aria-labelledby="problem-tools-heading">
+            <div class="admin-problem-shortcut-copy">
+                <p class="eyebrow">DÀNH CHO QUẢN TRỊ VIÊN</p>
+                <h2 id="problem-tools-heading">Kho bài tập của bạn</h2>
+                <p class="page-subtitle">Tạo bài, quản lý bài đã tạo và chọn quyền public/private.</p>
+            </div>
+            <div class="button-row">
+                <a class="button-link" href="create_problem.html">＋ Tạo bài tập</a>
+                <a class="button-link secondary" href="problems.html">Mở kho bài tập</a>
+            </div>
+        </section>
     </main>
-    <script type="module" src="../assets/js/account.js?v=20261021b"></script>
+    <script type="module" src="../assets/js/account.js?v=20261101c"></script>
 </body>
 </html>

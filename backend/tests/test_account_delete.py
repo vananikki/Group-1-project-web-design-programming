@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 import routers.authenticate as auth_router
 from db.tables_phase1 import Account, AccountRole, Base, Session as UserSession
+from db.tables_phase2 import Contest, Language, Problem, Submission
 from src.app import app
 from db.session import get_session
 
@@ -88,7 +89,26 @@ def test_super_admin_can_delete_another_account():
     assert response.json()["deleted_account_id"] == user_id
 
 
-def test_regular_user_can_delete_their_own_account():
+def test_super_admin_cannot_delete_their_own_account():
+    super_id = _create_account(
+        "super-self-delete@example.com",
+        AccountRole.SUPER_ADMIN,
+        code="SUPERSELF",
+        name="Super Admin",
+    )
+    _set_session(super_id, "super-self-session")
+
+    response = TestClient(app).delete(
+        f"/admin/accounts/{super_id}",
+        cookies={"session_id": "super-self-session"},
+    )
+
+    assert response.status_code == 403
+    with TestingSessionLocal() as db:
+        assert db.get(Account, super_id) is not None
+
+
+def test_regular_user_cannot_delete_their_own_account():
     user_id = _create_account("user2@example.com", AccountRole.USER, code="USER2", name="User Two")
     _set_session(user_id, "user-session")
 
@@ -98,8 +118,103 @@ def test_regular_user_can_delete_their_own_account():
         cookies={"session_id": "user-session"},
     )
 
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Không thể tự xóa tài khoản của mình"
+    with TestingSessionLocal() as db:
+        assert db.get(Account, user_id) is not None
+
+
+def test_admin_cannot_delete_their_own_account():
+    admin_id = _create_account(
+        "admin-self-delete@example.com",
+        AccountRole.ADMIN,
+        code="ADMINSELF",
+        name="Admin",
+    )
+    _set_session(admin_id, "admin-self-session")
+
+    response = TestClient(app).delete(
+        f"/admin/accounts/{admin_id}",
+        cookies={"session_id": "admin-self-session"},
+    )
+
+    assert response.status_code == 403
+    with TestingSessionLocal() as db:
+        assert db.get(Account, admin_id) is not None
+
+
+def test_delete_anonymizes_and_preserves_related_judge_data():
+    user_id = _create_account(
+        "author@example.com",
+        AccountRole.USER,
+        code="AUTHOR1",
+        name="Problem Author",
+    )
+    super_id = _create_account(
+        "author-delete-super@example.com",
+        AccountRole.SUPER_ADMIN,
+        code="AUTHSUPER",
+        name="Super Admin",
+    )
+    _set_session(super_id, "author-delete-super-session")
+
+    with TestingSessionLocal() as db:
+        language = Language(name="Python")
+        problem = Problem(
+            problem_name="Preserved problem",
+            time_limit=1,
+            memory_limit=128,
+            created_by=user_id,
+        )
+        contest = Contest(
+            contest_name="Preserved contest",
+            start_time=datetime.now(timezone.utc),
+            end_time=datetime.now(timezone.utc) + timedelta(hours=1),
+            created_by=user_id,
+        )
+        db.add_all([language, problem, contest])
+        db.flush()
+        submission = Submission(
+            problem_id=problem.problem_id,
+            account_id=user_id,
+            contest_id=contest.contest_id,
+            language_id=language.language_id,
+            status="Accepted",
+        )
+        db.add(submission)
+        db.commit()
+        problem_id = problem.problem_id
+        contest_id = contest.contest_id
+        submission_id = submission.submission_id
+
+    response = TestClient(app).delete(
+        f"/admin/accounts/{user_id}",
+        cookies={"session_id": "author-delete-super-session"},
+    )
+
     assert response.status_code == 200
-    assert response.json()["deleted_account_id"] == user_id
+    with TestingSessionLocal() as db:
+        assert db.get(Account, user_id) is None
+        assert db.get(Problem, problem_id).created_by is None
+        assert db.get(Contest, contest_id).created_by is None
+        assert db.get(Submission, submission_id).account_id is None
+
+
+def test_delete_preflight_allows_configured_frontend_origin():
+    origin = "http://100.73.218.40:5500"
+    response = TestClient(app).options(
+        "/admin/accounts/1",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Private-Network": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+    assert "DELETE" in response.headers["access-control-allow-methods"]
+    assert response.headers["access-control-allow-private-network"] == "true"
 
 
 def test_register_rejects_weak_password():

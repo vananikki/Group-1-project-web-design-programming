@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js?v=20261021b";
+import { apiFetch, readResponse } from "./api.js?v=20261029a";
 
 const logoutButton = document.getElementById("logout-button");
 const logoutError = document.getElementById("logout-error");
@@ -7,7 +7,6 @@ const accountNameInput = document.getElementById("account-name-input");
 const editNameButton = document.getElementById("edit-name-button");
 const saveNameButton = document.getElementById("save-name-button");
 const cancelNameButton = document.getElementById("cancel-name-button");
-const deleteAccountButton = document.getElementById("delete-account-button");
 const profileMessage = document.getElementById("profile-message");
 let currentAccount;
 
@@ -54,6 +53,8 @@ async function loadAccount() {
         document.getElementById("manage-accounts-link").hidden =
             currentAccount.role !== "SUPER_ADMIN";
         document.getElementById("judge-admin-link").hidden =
+            currentAccount.role !== "ADMIN" && currentAccount.role !== "SUPER_ADMIN";
+        document.getElementById("admin-problem-tools").hidden =
             currentAccount.role !== "ADMIN" && currentAccount.role !== "SUPER_ADMIN";
     } catch (error) {
         console.error(error);
@@ -109,53 +110,10 @@ saveNameButton.addEventListener("click", async () => {
         profileMessage.textContent = "Đã cập nhật tên tài khoản";
     } catch (error) {
         console.error(error);
-        profileMessage.textContent = "Không thể kết nối đến server";
+        profileMessage.textContent =
+            error instanceof Error ? error.message : "Không thể kết nối đến server";
     } finally {
         saveNameButton.disabled = false;
-    }
-});
-
-deleteAccountButton.addEventListener("click", async () => {
-    if (currentAccount.role === "SUPER_ADMIN") {
-        profileMessage.textContent = "Super admin không thể tự xóa tài khoản.";
-        return;
-    }
-
-    const confirmed = window.confirm("Bạn có chắc chắn muốn xóa tài khoản hiện tại? Hành động này không thể hoàn tác.");
-    if (!confirmed) {
-        return;
-    }
-
-    deleteAccountButton.disabled = true;
-    profileMessage.textContent = "";
-
-    try {
-        const response = await apiFetch(`/admin/accounts/${currentAccount.account_id}`, {
-            method: "DELETE"
-        });
-        const data = await readResponse(response);
-
-        if (response.status === 401) {
-            window.location.replace("login.html");
-            return;
-        }
-        if (!response.ok) {
-            profileMessage.textContent = data.detail || `Không thể xóa tài khoản (${response.status})`;
-            return;
-        }
-
-        const logoutResponse = await apiFetch("/auth/logout", { method: "POST" });
-        if (!logoutResponse.ok) {
-            window.location.replace("login.html");
-            return;
-        }
-
-        window.location.replace("login.html");
-    } catch (error) {
-        console.error(error);
-        profileMessage.textContent = "Không thể kết nối đến server";
-    } finally {
-        deleteAccountButton.disabled = false;
     }
 });
 
@@ -174,7 +132,8 @@ logoutButton.addEventListener("click", async () => {
         window.location.replace("login.html");
     } catch (error) {
         console.error(error);
-        logoutError.textContent = "Không thể kết nối đến server";
+        logoutError.textContent =
+            error instanceof Error ? error.message : "Không thể kết nối đến server";
         logoutButton.disabled = false;
     }
 });

@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException
-from sqlalchemy import select, or_
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
+from sqlalchemy import delete, select, or_
 from sqlalchemy.orm import Session, selectinload
 
 from db.schemas import (
@@ -44,6 +44,7 @@ from db.tables_phase2 import (
     ContestProblem,
     Language,
     Problem,
+    Solution,
     Submission,
     Testcase,
     add_problem_to_contest,
@@ -113,6 +114,18 @@ def _run_judge0(
 
 
 def _require_admin_account(session_id: str | None, session: Session) -> Account:
+    account = _require_authenticated_account(session_id, session)
+    if account.role not in {AccountRole.ADMIN, AccountRole.SUPER_ADMIN}:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền quản lý judge")
+
+    admin = session.scalar(select(Admin).where(Admin.account_id == account.account_id))
+    if admin is not None and not admin.is_active:
+        raise HTTPException(status_code=403, detail="Tài khoản quản trị đã bị vô hiệu hóa")
+
+    return account
+
+
+def _require_authenticated_account(session_id: str | None, session: Session) -> Account:
     if session_id is None:
         raise HTTPException(status_code=401, detail="Chưa đăng nhập")
 
@@ -131,34 +144,11 @@ def _require_admin_account(session_id: str | None, session: Session) -> Account:
         raise HTTPException(status_code=401, detail="Tài khoản không tồn tại")
     if not account.is_active:
         raise HTTPException(status_code=403, detail="Tài khoản chưa được kích hoạt")
-
-    if account.role not in {AccountRole.ADMIN, AccountRole.SUPER_ADMIN}:
-        raise HTTPException(status_code=403, detail="Bạn không có quyền quản lý judge")
-
-    admin = session.scalar(select(Admin).where(Admin.account_id == account.account_id))
-    if admin is not None and not admin.is_active:
-        raise HTTPException(status_code=403, detail="Tài khoản quản trị đã bị vô hiệu hóa")
-
     return account
 
 
 def _require_student_account(session_id: str | None, session: Session) -> Account:
-    if session_id is None:
-        raise HTTPException(status_code=401, detail="Chưa đăng nhập")
-
-    user_session = session.get(UserSession, session_id)
-    if user_session is None:
-        raise HTTPException(status_code=401, detail="Session không hợp lệ")
-
-    expires_at = user_session.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at <= datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Session đã hết hạn")
-
-    account = session.get(Account, user_session.account_id)
-    if account is None or not account.is_active:
-        raise HTTPException(status_code=403, detail="Tài khoản không hoạt động")
+    account = _require_authenticated_account(session_id, session)
     if account.role != AccountRole.USER:
         raise HTTPException(status_code=403, detail="Chức năng này dành cho học viên")
     return account
@@ -198,6 +188,18 @@ def _require_class_manager(
     return _class_owner_account_id(class_id, session) == account.account_id
 
 
+def _require_class_owner(
+    account: Account,
+    class_id: int,
+    session: Session,
+) -> None:
+    if not _require_class_manager(account, class_id, session):
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ admin chính của lớp mới có thể duyệt yêu cầu tham gia",
+        )
+
+
 def _parse_datetime(value: str | None, field_name: str) -> datetime:
     if value is None or value == "":
         raise HTTPException(status_code=422, detail=f"{field_name} là bắt buộc")
@@ -225,11 +227,13 @@ def _serialize_problem(problem: Problem) -> dict[str, Any]:
         "description": problem.description,
         "input_description": problem.input_description,
         "output_description": problem.output_description,
+        "data_constraints": problem.data_constraints,
         "time_limit": problem.time_limit,
         "memory_limit": problem.memory_limit,
         "access_modifier": problem.access_modifier.value,
         "created_by": problem.created_by,
         "creator_name": problem.creator.account_name if problem.creator else None,
+        "is_anonymous": problem.created_by is None,
         "created_at": problem.created_at.isoformat() if problem.created_at else None,
     }
 
@@ -279,6 +283,32 @@ def list_problems(
     return [_serialize_problem(problem) for problem in problems]
 
 
+@router.get("/problems/{problem_id}")
+def get_problem(
+    problem_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    problem = session.get(Problem, problem_id)
+    if problem is None:
+        raise HTTPException(status_code=404, detail="Problem không tồn tại")
+    if account.role != AccountRole.SUPER_ADMIN and problem.created_by != account.account_id:
+        raise HTTPException(status_code=403, detail="Bạn chỉ có thể xem bài tập của chính mình")
+    return {
+        **_serialize_problem(problem),
+        "class_ids": [item.class_id for item in problem.class_problems],
+        "testcases": [
+            {
+                "input_data": testcase.input_data,
+                "expected_output": testcase.expected_output,
+                "point": testcase.point,
+            }
+            for testcase in sorted(problem.testcases, key=lambda item: item.testcase_id)
+        ],
+    }
+
+
 @router.post("/problems")
 def create_problem(
     payload: ProblemCreateIn,
@@ -292,6 +322,7 @@ def create_problem(
         description=payload.description or None,
         input_description=payload.input_description or None,
         output_description=payload.output_description or None,
+        data_constraints=payload.data_constraints or None,
         time_limit=payload.time_limit,
         memory_limit=payload.memory_limit,
         created_by=account.account_id,
@@ -336,6 +367,8 @@ def update_problem(
         problem.input_description = updates["input_description"] or None
     if "output_description" in updates:
         problem.output_description = updates["output_description"] or None
+    if "data_constraints" in updates:
+        problem.data_constraints = updates["data_constraints"] or None
     if "time_limit" in updates and updates["time_limit"] is not None:
         problem.time_limit = updates["time_limit"]
     if "memory_limit" in updates and updates["memory_limit"] is not None:
@@ -355,6 +388,74 @@ def update_problem(
     session.commit()
     session.refresh(problem)
     return _serialize_problem(problem)
+
+
+@router.delete("/problems/{problem_id}")
+def delete_problem(
+    problem_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    if account.role != AccountRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ super admin mới có thể xóa problem",
+        )
+
+    problem = session.get(Problem, problem_id)
+    if problem is None:
+        raise HTTPException(status_code=404, detail="Problem không tồn tại")
+
+    session.execute(
+        delete(Submission).where(Submission.problem_id == problem_id)
+    )
+    session.execute(
+        delete(Testcase).where(Testcase.problem_id == problem_id)
+    )
+    session.execute(
+        delete(AcademicClassProblem).where(
+            AcademicClassProblem.problem_id == problem_id
+        )
+    )
+    session.execute(
+        delete(ContestProblem).where(ContestProblem.problem_id == problem_id)
+    )
+    session.execute(
+        delete(Solution).where(Solution.problem_id == problem_id)
+    )
+    session.delete(problem)
+    session.commit()
+
+    return {"message": "Đã xóa problem và dữ liệu liên quan", "problem_id": problem_id}
+
+
+@router.delete("/academic-classes/{class_id}")
+def delete_academic_class(
+    class_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    if account.role != AccountRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Chỉ super admin mới có thể xóa lớp")
+
+    academic_class = session.get(AcademicClass, class_id)
+    if academic_class is None:
+        raise HTTPException(status_code=404, detail="Academic class không tồn tại")
+
+    session.execute(delete(ClassJoinRequest).where(ClassJoinRequest.class_id == class_id))
+    session.execute(delete(StudentClass).where(StudentClass.class_id == class_id))
+    session.execute(delete(ManageClass).where(ManageClass.class_id == class_id))
+    session.execute(
+        delete(AcademicClassProblem).where(AcademicClassProblem.class_id == class_id)
+    )
+    session.execute(
+        delete(AcademicClassContest).where(AcademicClassContest.class_id == class_id)
+    )
+    session.delete(academic_class)
+    session.commit()
+    return {"message": "Đã xóa lớp và các liên kết phụ thuộc", "class_id": class_id}
 
 
 @router.get("/academic-classes")
@@ -445,6 +546,12 @@ def get_academic_class_detail(
             {
                 "problem_id": problem.problem_id,
                 "problem_name": problem.problem_name,
+                "description": problem.description,
+                "input_description": problem.input_description,
+                "output_description": problem.output_description,
+                "data_constraints": problem.data_constraints,
+                "time_limit": problem.time_limit,
+                "memory_limit": problem.memory_limit,
                 "access_modifier": problem.access_modifier.value,
                 "is_required": item.is_required,
             }
@@ -530,6 +637,61 @@ def list_class_managers(
     ]
 
 
+@router.get("/academic-classes/{class_id}/available-managers")
+def list_available_class_managers(
+    class_id: int,
+    search: str = Query(min_length=2, max_length=100),
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    is_owner = _require_class_manager(account, class_id, session)
+    if not is_owner and account.role != AccountRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ chủ lớp mới có thể mời quản trị viên",
+        )
+    search = search.strip()
+    if len(search) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="Nhập ít nhất 2 ký tự để tìm quản trị viên",
+        )
+
+    assigned_admins = (
+        select(ManageClass.manage_id)
+        .join(Admin, Admin.admin_id == ManageClass.admin_id)
+        .where(
+            ManageClass.class_id == class_id,
+            Admin.account_id == Account.account_id,
+        )
+    )
+    candidates = session.scalars(
+        select(Account)
+        .outerjoin(Admin, Admin.account_id == Account.account_id)
+        .where(
+            Account.role == AccountRole.ADMIN,
+            Account.is_active.is_(True),
+            or_(Admin.admin_id.is_(None), Admin.is_active.is_(True)),
+            or_(
+                Account.account_name.ilike(f"%{search}%"),
+                Account.account_email.ilike(f"%{search}%"),
+            ),
+            ~assigned_admins.exists(),
+        )
+        .order_by(Account.account_name, Account.account_email)
+        .limit(10)
+    ).all()
+    return [
+        {
+            "account_id": candidate.account_id,
+            "account_name": candidate.account_name,
+            "account_email": candidate.account_email,
+        }
+        for candidate in candidates
+    ]
+
+
 @router.post("/academic-classes/{class_id}/managers")
 def add_class_manager(
     class_id: int,
@@ -579,7 +741,10 @@ def remove_class_manager(
     is_owner = _require_class_manager(account, class_id, session)
     if not is_owner and account.role != AccountRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Chỉ chủ lớp mới có thể thay đổi quyền quản lý")
-    if account_id == _class_owner_account_id(class_id, session):
+    if (
+        account.role != AccountRole.SUPER_ADMIN
+        and account_id == _class_owner_account_id(class_id, session)
+    ):
         raise HTTPException(status_code=409, detail="Không thể gỡ quyền của chủ lớp")
 
     admin = session.scalar(select(Admin).where(Admin.account_id == account_id))
@@ -730,6 +895,7 @@ def get_student_class(
                 "description": item.problem.description,
                 "input_description": item.problem.input_description,
                 "output_description": item.problem.output_description,
+                "data_constraints": item.problem.data_constraints,
                 "time_limit": item.problem.time_limit,
                 "memory_limit": item.problem.memory_limit,
                 "is_required": item.is_required,
@@ -754,7 +920,7 @@ def list_submission_languages(
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
-    _require_student_account(session_id, session)
+    _require_authenticated_account(session_id, session)
     return [
         {"language_id": item.language_id, "name": item.name}
         for item in session.scalars(select(Language).order_by(Language.name)).all()
@@ -805,6 +971,7 @@ def get_student_contest(
                 "description": item.problem.description,
                 "input_description": item.problem.input_description,
                 "output_description": item.problem.output_description,
+                "data_constraints": item.problem.data_constraints,
                 "time_limit": item.problem.time_limit,
                 "memory_limit": item.problem.memory_limit,
                 "problem_order": item.problem_order,
@@ -959,18 +1126,6 @@ def submit_solution(
     if session.get(AcademicClassProblem, (class_id, problem_id)) is None:
         raise HTTPException(status_code=404, detail="Bài tập không thuộc lớp này")
     problem = session.get(Problem, problem_id)
-    language = session.get(Language, payload.language_id)
-    if language is None:
-        raise HTTPException(status_code=422, detail="Ngôn ngữ lập trình không hợp lệ")
-    testcases = session.scalars(
-        select(Testcase)
-        .where(Testcase.problem_id == problem_id)
-        .order_by(Testcase.testcase_id)
-    ).all()
-    if not testcases:
-        raise HTTPException(status_code=409, detail="Bài tập chưa có test case để chấm")
-    if len(testcases) > 100:
-        raise HTTPException(status_code=409, detail="Bài tập có quá nhiều test case để chấm")
     contest = None
     if payload.contest_id is not None:
         if session.get(AcademicClassContest, (class_id, payload.contest_id)) is None:
@@ -981,6 +1136,29 @@ def submit_solution(
         now = datetime.now(timezone.utc)
         if not (_as_utc(contest.start_time) <= now <= _as_utc(contest.end_time)):
             raise HTTPException(status_code=409, detail="Cuộc thi chưa bắt đầu hoặc đã kết thúc")
+
+    return _grade_and_store_submission(account, problem, payload, contest, session)
+
+
+def _grade_and_store_submission(
+    account: Account,
+    problem: Problem,
+    payload: StudentSubmissionIn,
+    contest: Contest | None,
+    session: Session,
+) -> dict[str, Any]:
+    language = session.get(Language, payload.language_id)
+    if language is None:
+        raise HTTPException(status_code=422, detail="Ngôn ngữ lập trình không hợp lệ")
+    testcases = session.scalars(
+        select(Testcase)
+        .where(Testcase.problem_id == problem.problem_id)
+        .order_by(Testcase.testcase_id)
+    ).all()
+    if not testcases:
+        raise HTTPException(status_code=409, detail="Bài tập chưa có test case để chấm")
+    if len(testcases) > 100:
+        raise HTTPException(status_code=409, detail="Bài tập có quá nhiều test case để chấm")
 
     testcase_results = []
     score = 0
@@ -1039,7 +1217,7 @@ def submit_solution(
         )
     )
     submission = Submission(
-        problem_id=problem_id,
+        problem_id=problem.problem_id,
         account_id=account.account_id,
         language_id=language.language_id,
         contest_id=contest.contest_id if contest else None,
@@ -1060,6 +1238,105 @@ def submit_solution(
     }
 
 
+@student_router.get("/problems")
+def list_public_problems(
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    _require_authenticated_account(session_id, session)
+    problems = session.scalars(
+        select(Problem)
+        .where(Problem.access_modifier == AccessModifier.PUBLIC)
+        .order_by(Problem.problem_id.desc())
+    ).all()
+    return [
+        {
+            "problem_id": problem.problem_id,
+            "problem_name": problem.problem_name,
+            "description": problem.description,
+            "input_description": problem.input_description,
+            "output_description": problem.output_description,
+            "data_constraints": problem.data_constraints,
+            "time_limit": problem.time_limit,
+            "memory_limit": problem.memory_limit,
+        }
+        for problem in problems
+    ]
+
+
+@student_router.get("/submissions")
+def list_student_submission_history(
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_authenticated_account(session_id, session)
+    rows = session.execute(
+        select(
+            Submission,
+            Problem.problem_name,
+            Problem.access_modifier,
+            Contest.contest_name,
+        )
+        .join(Problem, Problem.problem_id == Submission.problem_id)
+        .outerjoin(Contest, Contest.contest_id == Submission.contest_id)
+        .where(Submission.account_id == account.account_id)
+        .order_by(Submission.submitted_at.desc(), Submission.submission_id.desc())
+        .limit(100)
+    ).all()
+    return [
+        {
+            "submission_id": submission.submission_id,
+            "problem_id": submission.problem_id,
+            "problem_name": problem_name,
+            "access_modifier": access_modifier.value,
+            "contest_id": submission.contest_id,
+            "contest_name": contest_name,
+            "status": submission.status,
+            "score": submission.score,
+            "submitted_at": _as_utc(submission.submitted_at).isoformat(),
+        }
+        for submission, problem_name, access_modifier, contest_name in rows
+    ]
+
+
+@student_router.get("/problems/{problem_id}")
+def get_public_problem(
+    problem_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    _require_authenticated_account(session_id, session)
+    problem = session.get(Problem, problem_id)
+    if problem is None or problem.access_modifier != AccessModifier.PUBLIC:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài tập public")
+    return {
+        "problem_id": problem.problem_id,
+        "problem_name": problem.problem_name,
+        "description": problem.description,
+        "input_description": problem.input_description,
+        "output_description": problem.output_description,
+        "data_constraints": problem.data_constraints,
+        "time_limit": problem.time_limit,
+        "memory_limit": problem.memory_limit,
+    }
+
+
+@student_router.post("/problems/{problem_id}/submissions")
+def submit_public_solution(
+    problem_id: int,
+    payload: StudentSubmissionIn,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_authenticated_account(session_id, session)
+    problem = session.get(Problem, problem_id)
+    if problem is None or problem.access_modifier != AccessModifier.PUBLIC:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài tập public")
+    if payload.contest_id is not None:
+        raise HTTPException(status_code=422, detail="Bài luyện tập public không thuộc cuộc thi")
+    return _grade_and_store_submission(account, problem, payload, None, session)
+
+
 @router.get("/academic-classes/{class_id}/join-requests")
 def list_class_join_requests(
     class_id: int,
@@ -1067,7 +1344,7 @@ def list_class_join_requests(
     session: Session = Depends(get_session),
 ):
     account = _require_admin_account(session_id, session)
-    _require_class_manager(account, class_id, session)
+    _require_class_owner(account, class_id, session)
     requests = session.scalars(
         select(ClassJoinRequest)
         .options(selectinload(ClassJoinRequest.student).selectinload(Student.account))
@@ -1095,7 +1372,7 @@ def decide_class_join_request(
     session: Session = Depends(get_session),
 ):
     account = _require_admin_account(session_id, session)
-    _require_class_manager(account, class_id, session)
+    _require_class_owner(account, class_id, session)
     join_request = session.get(ClassJoinRequest, request_id)
     if join_request is None or join_request.class_id != class_id:
         raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu tham gia")
@@ -1165,6 +1442,7 @@ def create_problem_for_class(
         description=payload.description or None,
         input_description=payload.input_description or None,
         output_description=payload.output_description or None,
+        data_constraints=payload.data_constraints or None,
         time_limit=payload.time_limit,
         memory_limit=payload.memory_limit,
         created_by=account.account_id,
@@ -1279,6 +1557,96 @@ def list_contests(
         select(Contest).options(selectinload(Contest.creator)).order_by(Contest.contest_id.desc())
     ).all()
     return [_serialize_contest(contest) for contest in contests]
+
+
+@router.delete("/contests/{contest_id}")
+def delete_contest(
+    contest_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    if account.role != AccountRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Chỉ super admin mới có thể xóa contest")
+
+    contest = session.get(Contest, contest_id)
+    if contest is None:
+        raise HTTPException(status_code=404, detail="Contest không tồn tại")
+
+    session.execute(delete(Submission).where(Submission.contest_id == contest_id))
+    session.execute(
+        delete(AcademicClassContest).where(
+            AcademicClassContest.contest_id == contest_id
+        )
+    )
+    session.execute(
+        delete(ContestProblem).where(ContestProblem.contest_id == contest_id)
+    )
+    session.delete(contest)
+    session.commit()
+    return {"message": "Đã xóa contest và dữ liệu liên quan", "contest_id": contest_id}
+
+
+@router.get("/submissions")
+def list_submissions(
+    submission_id: int | None = Query(default=None, ge=1),
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    if account.role != AccountRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ super admin mới có thể quản lý bài nộp",
+        )
+
+    query = (
+        select(Submission, Problem.problem_name, Account.account_name)
+        .join(Problem, Problem.problem_id == Submission.problem_id)
+        .outerjoin(Account, Account.account_id == Submission.account_id)
+        .order_by(Submission.submitted_at.desc(), Submission.submission_id.desc())
+    )
+    if submission_id is not None:
+        rows = session.execute(
+            query.where(Submission.submission_id == submission_id)
+        ).all()
+    else:
+        rows = session.execute(query.limit(500)).all()
+    return [
+        {
+            "submission_id": submission.submission_id,
+            "problem_id": submission.problem_id,
+            "problem_name": problem_name,
+            "account_id": submission.account_id,
+            "account_name": account_name or "Ẩn danh",
+            "contest_id": submission.contest_id,
+            "status": submission.status,
+            "score": submission.score,
+            "submitted_at": _as_utc(submission.submitted_at).isoformat(),
+        }
+        for submission, problem_name, account_name in rows
+    ]
+
+
+@router.delete("/submissions/{submission_id}")
+def delete_submission(
+    submission_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    if account.role != AccountRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ super admin mới có thể xóa bài nộp",
+        )
+
+    submission = session.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Bài nộp không tồn tại")
+    session.delete(submission)
+    session.commit()
+    return {"message": "Đã xóa bài nộp", "submission_id": submission_id}
 
 
 @router.get("/contests/{contest_id}")

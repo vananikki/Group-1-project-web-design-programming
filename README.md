@@ -17,6 +17,7 @@ The project is now extended beyond the original account-management layer. The ve
 - super-admin account management
 - admin judge management for problems, academic classes, and contests
 - creation and editing of admin-owned problems, including public/private visibility and test cases
+- LaTeX problem statements with a live rendered preview while authoring
 - assignment of public or admin-owned problems into academic classes and contest rounds
 - academic class rosters with student enrollment/removal, exercises, and linked contests
 - contest metadata and status tracking for upcoming/active/finished periods
@@ -72,13 +73,14 @@ The current backend is responsible for:
 - class detail and contest detail APIs for problem and standings summaries
 - database access through SQLAlchemy
 
-Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. Class administrators create classes and problems, approve enrollment requests, and manage class-specific administrator permissions. Class ownership reuses the existing `manage_class` relation; the first administrator assigned to a class is its owner. A new `class_join_request` table records approval requests. Submissions are executed by the configured Judge0 service, never by the web server. The upgrade migration creates missing model tables and adds the contest and source-code fields to an existing `submission` table.
+Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. They can also practice public problems from the problem bank without joining a class. Administrators create problems in their own library from a separate editor; only the owner (or a super admin) can view and edit a problem's test cases. Public problems appear in the shared practice library, while private problems are only visible to students through classes where they have been assigned. Class administrators approve enrollment requests and manage class-specific administrator permissions. Class owners can search active administrator accounts by name or email and invite them to a class. Class ownership reuses the existing `manage_class` relation; the first administrator assigned to a class is its owner. Only administrators assigned to a class can access it, and only its owner (the primary administrator) can review student join requests. Requests remain pending until the owner approves or rejects them. A new `class_join_request` table records approval requests. Submissions are executed by the configured Judge0 service, never by the web server. The upgrade migration creates missing model tables and adds the contest and source-code fields to an existing `submission` table.
 
 ---
 
 ## Local development
 
 Run the backend and frontend in two separate terminals.
+See [database.md](./database.md) for the complete table, column, constraint, and relationship reference.
 
 ### 1) Backend
 
@@ -88,17 +90,20 @@ Before starting the app for the first time, or after changing the SQLAlchemy mod
 cd backend
 PYTHONPATH=. .venv/bin/python db/initialize_tables.py
 PYTHONPATH=. .venv/bin/python db/migrate_judge_admin.py
-.venv/bin/python -m uvicorn src.app:app --host 0.0.0.0 --port 8000
+PYTHONPATH=. .venv/bin/python -m src.serve
 ```
 
 For an existing database, run `migrate_judge_admin.py` before starting the backend. It is safe to run more than once; `initialize_tables.py` alone does not add columns to existing tables.
+The migration also allows deleting accounts without losing judge history: authored problems, contests, and submissions are retained with the deleted account reference cleared.
+Problems without an owner are marked “Ẩn danh” in judge management. Only super admins can delete problems; deletion also permanently removes their test cases, solutions, class/contest links, and submissions.
+Super admins can also delete classes, contests, and individual submissions. Deleting a class removes its memberships and links while keeping shared problems and contests; deleting a contest removes its submissions and links while keeping its problems. No account can delete itself; the final super-admin account is also protected from deletion by another super admin.
 To enable code submissions, run a Judge0 instance, set `JUDGE0_URL` in the backend environment, and sync its language list with `PYTHONPATH=. .venv/bin/python db/initialize_languages.py`. The UI reports a service error when Judge0 is not reachable; submitted source code is never executed in the FastAPI process.
 
 ### 2) Frontend
 
 ```bash
 cd frontend
-python3 -m http.server 5500
+python3 -m http.server 5500 --bind ::
 ```
 
 Open the app at:
@@ -106,14 +111,21 @@ Open the app at:
 - Backend: `http://localhost:8000`
 - Frontend: `http://localhost:5500`
 
-The backend allows credentialed requests from the common local origins by default, including:
+Both servers listen on IPv4 and IPv6 so other devices can connect through the machine's LAN or Tailscale addresses.
+
+The frontend uses the same hostname as the page to find the backend, including IPv6 addresses. The backend allows credentialed requests from private IPv4, Tailscale IPv4, and local IPv6 origins by default, including:
 
 - `http://localhost:5500`
 - `http://127.0.0.1:5500`
 - `http://0.0.0.0:5500`
+- `http://172.17.22.24:5500`
+- `http://172.18.0.1:5500`
+- `http://172.19.0.1:5500`
+- `http://100.73.218.40:5500`
+- `http://[fd7a:115c:a1e0::ee01:daa5]:5500`
 
-If the frontend is served from another origin, update `CORS_ORIGINS` in the backend environment with the exact origin list.
-When using a remote VS Code workspace, the browser may see the forwarded backend on a different local port than `8000`. On localhost, the frontend verifies the Online Judge API on ports `8001` through `8010` after the default port is unavailable, and remembers the verified port for the current tab.
+The same applies to the frontend on port `5500` and backend API on port `8000`. A private or Docker bridge address such as `172.18.0.1` or `172.19.0.1` only works for other devices if their network can route to that interface; otherwise use the machine's LAN or Tailscale address. If the frontend is served from another public origin, update `CORS_ORIGINS` in the backend environment with the exact origin list.
+When using a remote VS Code workspace, make sure the backend port `8000` is forwarded in the VS Code **Ports** panel as well as the frontend port `5500`. The browser may map the backend to a local port from `8001` through `8010`; on localhost, the frontend verifies those ports after `8000` is unavailable and remembers the verified port for the current tab. If VS Code assigns a port outside that range, forward the backend as local port `8000` or update the discovery range in `frontend/assets/js/api.js`. Restart an already-running backend with `PYTHONPATH=. .venv/bin/python -m src.serve` to enable both IPv4 and IPv6 listeners.
 
 ---
 
@@ -305,6 +317,7 @@ The main backend routes currently cover:
 | `GET` | `/admin/accounts` | List accounts for a super admin |
 | `PATCH` | `/admin/accounts/{account_id}/role` | Change a user's role |
 | `GET` | `/admin/judge/problems` | List problems |
+| `GET` | `/admin/judge/problems/{problem_id}` | View an owned problem and its test cases |
 | `POST` | `/admin/judge/problems` | Create a problem with optional test cases |
 | `PATCH` | `/admin/judge/problems/{problem_id}` | Edit a problem and optionally replace its test cases |
 | `GET`, `POST` | `/admin/judge/academic-classes` | List and create academic classes |
@@ -323,6 +336,8 @@ The main backend routes currently cover:
 | `POST` | `/admin/judge/contests/{contest_id}/problems` | Add a problem to a contest |
 | `POST` | `/admin/judge/academic-classes/{class_id}/contests` | Attach a contest to a class |
 | `GET` | `/student/available-classes` | List classes and the student's access status |
+| `GET` | `/student/problems` | List public problems for practice |
+| `POST` | `/student/problems/{problem_id}/submissions` | Submit a solution to a public problem |
 | `GET` | `/student/classes` | List classes the student has joined |
 | `POST` | `/student/classes/{class_id}/join-requests` | Request access to a class |
 | `GET` | `/student/classes/{class_id}` | View class problems and contests after approval |

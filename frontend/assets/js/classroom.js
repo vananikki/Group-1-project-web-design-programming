@@ -1,4 +1,5 @@
-import { apiFetch, readResponse } from "./api.js?v=20261021b";
+import { apiFetch, readResponse } from "./api.js?v=20261029a";
+import { typesetMath } from "./latex.js?v=20261101b";
 
 const pageMessage = document.getElementById("page-message");
 const adminHome = document.getElementById("admin-home");
@@ -6,13 +7,13 @@ const studentHome = document.getElementById("student-home");
 const workspace = document.getElementById("class-workspace");
 const adminTools = document.getElementById("admin-class-tools");
 const createClassForm = document.getElementById("create-class-form");
-const createProblemForm = document.getElementById("create-problem-form");
-const problemMessage = document.getElementById("create-problem-message");
 let currentAccount;
 let activeClassId;
 let activeProblemId;
 let activeContestId;
 let languagesPromise;
+let managerSearchTimer;
+let managerSearchRequest = 0;
 
 function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -30,33 +31,11 @@ function setMessage(element, text, isError = false) {
     element.classList.toggle("success", !isError && Boolean(text));
 }
 
-function addClassTestcase() {
-    const container = document.getElementById("class-testcase-list");
-    if (container.children.length >= 100) {
-        document.getElementById("add-class-testcase").disabled = true;
-        return;
-    }
-    const row = document.createElement("div");
-    row.className = "testcase-row";
-    row.innerHTML = `<div class="testcase-row-heading"><strong>Test case ${container.children.length + 1}</strong>
-        <button class="secondary" type="button" data-action="remove-testcase">Xóa</button></div>
-        <label>Input<textarea name="input_data" rows="3"></textarea></label>
-        <label>Output mong đợi<textarea name="expected_output" rows="3"></textarea></label>
-        <label>Điểm<input name="point" type="number" min="1" max="100" required></label>`;
-    container.appendChild(row);
-    const rows = [...container.querySelectorAll(".testcase-row")];
-    const basePoints = Math.floor(100 / rows.length);
-    const remainder = 100 % rows.length;
-    rows.forEach((item, index) => {
-        item.querySelector('[name="point"]').value = String(basePoints + (index < remainder ? 1 : 0));
-        item.querySelector("strong").textContent = `Test case ${index + 1}`;
+function renderProblemMath(element) {
+    typesetMath(element).catch((error) => {
+        console.error(error);
+        setMessage(pageMessage, error.message || "Không thể hiển thị công thức LaTeX.", true);
     });
-    document.getElementById("add-class-testcase").disabled = rows.length >= 100;
-}
-
-function resetClassTestcases() {
-    document.getElementById("class-testcase-list").replaceChildren();
-    addClassTestcase();
 }
 
 async function requestJson(path, options) {
@@ -72,8 +51,7 @@ function classCard(item, { joined = false, managed = false } = {}) {
     const actions = managed
         ? item.is_claimable
             ? `<button type="button" data-action="claim-class" data-class-id="${item.class_id}">Nhận quyền quản lý</button>`
-            : `<button type="button" data-action="open-admin-class" data-class-id="${item.class_id}">Mở lớp</button>
-               <button type="button" class="secondary" data-action="create-problem" data-class-id="${item.class_id}">Tạo bài tập</button>`
+            : `<button type="button" data-action="open-admin-class" data-class-id="${item.class_id}">Mở lớp</button>`
         : joined
             ? `<button type="button" data-action="open-student-class" data-class-id="${item.class_id}">Vào lớp</button>`
             : item.membership_status === "pending"
@@ -127,11 +105,12 @@ function showHome() {
     workspace.hidden = true;
     adminHome.hidden = currentAccount.role === "USER";
     studentHome.hidden = currentAccount.role !== "USER";
-    document.getElementById("create-problem-form").hidden = true;
 }
 
 async function openClass(classId, isStudent) {
     activeClassId = Number(classId);
+    clearTimeout(managerSearchTimer);
+    managerSearchRequest += 1;
     activeContestId = null;
     pageMessage.textContent = "";
     const data = await requestJson(
@@ -150,11 +129,11 @@ async function openClass(classId, isStudent) {
     const canManagePermissions = canManage && (
         currentAccount.role === "SUPER_ADMIN" || data.is_owner
     );
-    document.getElementById("create-problem-toggle").hidden = !canManage;
+    const canReviewJoinRequests = canManage && data.is_owner;
     adminTools.hidden = !canManage;
+    document.getElementById("join-request-tools").hidden = !canReviewJoinRequests;
     document.getElementById("manager-tools").hidden = !canManagePermissions;
-    document.getElementById("member-heading").hidden = !canManage;
-    document.getElementById("member-list").hidden = !canManage;
+    document.getElementById("class-members-panel").hidden = !canManage;
     document.getElementById("member-list").innerHTML = canManage
         ? (data.students || []).map((member) => `<div class="entity-row">
             <span><strong>${escapeHtml(member.account_name)}</strong><small>${escapeHtml(member.account_email)}</small></span>
@@ -167,25 +146,23 @@ async function openClass(classId, isStudent) {
             <div>
                 <p class="class-card-kicker">BÀI TẬP · #${escapeHtml(problem.problem_id)}</p>
                 <h4>${escapeHtml(problem.problem_name)}</h4>
-                ${problem.description ? `<p>${escapeHtml(problem.description)}</p>` : ""}
+                ${problem.description?.trim() ? `<p>${escapeHtml(problem.description)}</p>` : ""}
                 ${problem.is_required ? `<span class="status-pill">Bắt buộc</span>` : ""}
             </div>
-            ${problem.description || problem.input_description || problem.output_description ? `
-                <details class="problem-specification">
-                    <summary>Xem đề bài</summary>
-                    ${problem.input_description ? `<h5>Input</h5><p>${escapeHtml(problem.input_description)}</p>` : ""}
-                    ${problem.output_description ? `<h5>Output</h5><p>${escapeHtml(problem.output_description)}</p>` : ""}
-                </details>` : ""}
+            <a class="button-link secondary" href="problem_statement.html?problem_id=${encodeURIComponent(problem.problem_id)}&source=class&class_id=${encodeURIComponent(activeClassId)}">Xem đề bài</a>
             ${isStudent ? `<button type="button" data-action="solve-problem" data-problem-id="${problem.problem_id}">Nộp lời giải</button>` : ""}
         </article>`).join("") || `<div class="empty-state"><p>Lớp chưa có bài tập.</p></div>`;
+    renderProblemMath(document.getElementById("class-problem-list"));
     document.getElementById("class-contest-list").innerHTML = (data.contests || []).map((contest) => `
         <article class="problem-card">
             <div><p class="class-card-kicker">CUỘC THI · ${escapeHtml(contest.status)}</p><h4>${escapeHtml(contest.contest_name)}</h4></div>
             <span>${new Date(contest.start_time).toLocaleString()} – ${new Date(contest.end_time).toLocaleString()}</span>
             ${isStudent ? `<button type="button" data-action="open-contest" data-contest-id="${contest.contest_id}">Mở cuộc thi</button>` : ""}
         </article>`).join("") || `<div class="empty-state"><p>Chưa có cuộc thi nào.</p></div>`;
+    renderProblemMath(document.getElementById("class-contest-list"));
 
     if (canManage) {
+        await loadAttachableProblems(data.problems || []);
         const contestProblemSelect = document.getElementById("contest-problem-select");
         contestProblemSelect.innerHTML = (data.problems || []).map((problem) =>
             `<option value="${problem.problem_id}">${escapeHtml(problem.problem_name)}</option>`
@@ -195,11 +172,45 @@ async function openClass(classId, isStudent) {
         document.getElementById("create-contest-message").textContent = data.problems?.length
             ? ""
             : "Thêm ít nhất một bài tập vào lớp trước khi tạo cuộc thi.";
-        await loadJoinRequests(activeClassId);
+        if (canReviewJoinRequests) {
+            await loadJoinRequests(activeClassId);
+        }
         await loadManagers(activeClassId, canManagePermissions);
     } else {
         document.getElementById("submission-history").hidden = false;
         await loadSubmissionHistory(activeClassId);
+    }
+}
+
+async function loadAttachableProblems(classProblems) {
+    const picker = document.getElementById("class-problem-picker");
+    const button = document.getElementById("add-problem-button");
+    const currentClassId = activeClassId;
+    setMessage(document.getElementById("add-problem-message"), "");
+    picker.innerHTML = `<option value="">Đang tải bài tập...</option>`;
+    button.disabled = true;
+    try {
+        const library = await requestJson("/admin/judge/problems");
+        if (currentClassId !== activeClassId) {
+            return;
+        }
+        const attachedIds = new Set(classProblems.map((problem) => problem.problem_id));
+        const candidates = library.filter((problem) => !attachedIds.has(problem.problem_id));
+        picker.innerHTML = `<option value="">Chọn bài tập để thêm</option>${candidates.map((problem) =>
+            `<option value="${problem.problem_id}">${escapeHtml(problem.problem_name)} · ${problem.access_modifier === "public" ? "Public" : "Private"}</option>`
+        ).join("")}`;
+        if (!candidates.length) {
+            setMessage(document.getElementById("add-problem-message"), "Không còn bài trong kho của bạn hoặc bài public để thêm.");
+        }
+        button.disabled = !candidates.length;
+    } catch (error) {
+        console.error(error);
+        picker.innerHTML = `<option value="">Không thể tải bài tập</option>`;
+        setMessage(
+            document.getElementById("add-problem-message"),
+            error.message || "Không thể tải bài tập để thêm vào lớp.",
+            true,
+        );
     }
 }
 
@@ -216,12 +227,58 @@ async function loadJoinRequests(classId) {
 }
 
 async function loadManagers(classId, canManagePermissions) {
+    clearTimeout(managerSearchTimer);
+    const requestId = ++managerSearchRequest;
     const managers = await requestJson(`/admin/judge/academic-classes/${classId}/managers`);
+    if (classId !== activeClassId || requestId !== managerSearchRequest) {
+        return;
+    }
     const list = document.getElementById("manager-list");
     list.innerHTML = managers.map((manager) => `<div class="entity-row">
         <span><strong>${escapeHtml(manager.account_name)}</strong><small>${escapeHtml(manager.account_email)} · ${manager.is_owner ? "Chủ lớp" : "Quản trị viên"}</small></span>
-        ${canManagePermissions && !manager.is_owner ? `<button class="secondary" type="button" data-action="remove-manager" data-account-id="${manager.account_id}">Thu hồi quyền</button>` : ""}
+        ${canManagePermissions && (!manager.is_owner || currentAccount.role === "SUPER_ADMIN") ? `<button class="secondary" type="button" data-action="remove-manager" data-account-id="${manager.account_id}">Thu hồi quyền</button>` : ""}
     </div>`).join("");
+    const search = document.getElementById("manager-search");
+    const availableList = document.getElementById("available-manager-list");
+    availableList.replaceChildren();
+    if (!canManagePermissions) {
+        return;
+    }
+
+    availableList.innerHTML = `<p class="field-hint">Nhập tên hoặc email để tìm quản trị viên.</p>`;
+    search.oninput = () => {
+        clearTimeout(managerSearchTimer);
+        const query = search.value.trim();
+        managerSearchRequest += 1;
+        const requestId = managerSearchRequest;
+        if (query.length < 2) {
+            availableList.innerHTML = `<p class="field-hint">Nhập ít nhất 2 ký tự để tìm.</p>`;
+            return;
+        }
+        availableList.innerHTML = `<p class="field-hint">Đang tìm...</p>`;
+        managerSearchTimer = setTimeout(async () => {
+            try {
+                const candidates = await requestJson(
+                    `/admin/judge/academic-classes/${classId}/available-managers?search=${encodeURIComponent(query)}`,
+                );
+                if (requestId !== managerSearchRequest) {
+                    return;
+                }
+                availableList.innerHTML = candidates.map((candidate) => `
+                    <div class="entity-row">
+                        <span><strong>${escapeHtml(candidate.account_name)}</strong><small>${escapeHtml(candidate.account_email)}</small></span>
+                        <button type="button" data-action="add-manager" data-account-id="${candidate.account_id}">Mời</button>
+                    </div>
+                `).join("") || `<p class="field-hint">Không tìm thấy quản trị viên phù hợp.</p>`;
+            } catch (error) {
+                if (requestId !== managerSearchRequest) {
+                    return;
+                }
+                console.error(error);
+                availableList.innerHTML = `<p class="field-hint error">${escapeHtml(error.message || "Không thể tìm quản trị viên.")}</p>`;
+            }
+        }, 250);
+    };
 }
 
 async function loadLanguages() {
@@ -268,16 +325,12 @@ async function openContest(contestId) {
             <div>
                 <p class="class-card-kicker">BÀI ${escapeHtml(problem.problem_order ?? "—")} · #${escapeHtml(problem.problem_id)}</p>
                 <h4>${escapeHtml(problem.problem_name)} ${problem.is_solved ? "✓" : ""}</h4>
-                ${problem.description ? `<p>${escapeHtml(problem.description)}</p>` : ""}
-                <details class="problem-specification">
-                    <summary>Xem đề bài và giới hạn</summary>
-                    ${problem.input_description ? `<h5>Input</h5><p>${escapeHtml(problem.input_description)}</p>` : ""}
-                    ${problem.output_description ? `<h5>Output</h5><p>${escapeHtml(problem.output_description)}</p>` : ""}
-                    <p>Thời gian: ${escapeHtml(problem.time_limit)} giây · Bộ nhớ: ${escapeHtml(problem.memory_limit)} MB</p>
-                </details>
+                ${problem.description?.trim() ? `<p>${escapeHtml(problem.description)}</p>` : ""}
+                <a class="button-link secondary" href="problem_statement.html?problem_id=${encodeURIComponent(problem.problem_id)}&source=class&class_id=${encodeURIComponent(activeClassId)}">Xem đề bài</a>
             </div>
             ${contest.can_submit ? `<button type="button" data-action="solve-contest-problem" data-problem-id="${problem.problem_id}">Nộp bài</button>` : ""}
         </article>`).join("") || `<div class="empty-state"><p>Cuộc thi chưa có bài thi.</p></div>`;
+    renderProblemMath(document.getElementById("contest-problem-list"));
     document.getElementById("contest-standings").innerHTML = standings.standings.map((participant) => `
         <div class="entity-row ${participant.is_current_user ? "current-participant" : ""}">
             <span><strong>#${participant.rank} · ${escapeHtml(participant.account_name)}</strong><small>${participant.solved} bài giải đúng · ${participant.penalty} lượt sai</small></span>
@@ -352,24 +405,6 @@ document.body.addEventListener("click", async (event) => {
     try {
         const classId = button.dataset.classId || activeClassId;
         switch (button.dataset.action) {
-            case "remove-testcase":
-                button.closest(".testcase-row").remove();
-                [...document.querySelectorAll("#class-testcase-list .testcase-row")].forEach((row, index) => {
-                    row.querySelector("strong").textContent = `Test case ${index + 1}`;
-                });
-                if (!document.querySelector("#class-testcase-list .testcase-row")) {
-                    addClassTestcase();
-                } else {
-                    const rows = [...document.querySelectorAll("#class-testcase-list .testcase-row")];
-                    const basePoints = Math.floor(100 / rows.length);
-                    const remainder = 100 % rows.length;
-                    rows.forEach((row, index) => {
-                        row.querySelector('[name="point"]').value =
-                            String(basePoints + (index < remainder ? 1 : 0));
-                    });
-                    document.getElementById("add-class-testcase").disabled = false;
-                }
-                break;
             case "open-admin-class":
                 await openClass(classId, false);
                 break;
@@ -377,11 +412,6 @@ document.body.addEventListener("click", async (event) => {
                 await requestJson(`/admin/judge/academic-classes/${classId}/claim`, { method: "POST" });
                 setMessage(pageMessage, "Bạn đã trở thành chủ lớp.");
                 await loadAdminClasses();
-                break;
-            case "create-problem":
-                await openClass(classId, false);
-                createProblemForm.hidden = false;
-                createProblemForm.scrollIntoView({ behavior: "smooth", block: "start" });
                 break;
             case "open-student-class":
                 await openClass(classId, true);
@@ -438,6 +468,16 @@ document.body.addEventListener("click", async (event) => {
                     { method: "DELETE" },
                 );
                 await loadManagers(activeClassId, true);
+                break;
+            case "add-manager":
+                await requestJson(`/admin/judge/academic-classes/${activeClassId}/managers`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ account_id: Number(button.dataset.accountId) }),
+                });
+                setMessage(document.getElementById("manager-message"), "Đã mời quản trị viên vào lớp.");
+                await loadManagers(activeClassId, true);
+                document.getElementById("manager-search").dispatchEvent(new Event("input"));
                 break;
         }
     } catch (error) {
@@ -502,49 +542,31 @@ document.getElementById("solution-form").addEventListener("submit", async (event
 });
 
 document.getElementById("back-to-classes").addEventListener("click", showHome);
-document.getElementById("create-problem-toggle").addEventListener("click", () => {
-    createProblemForm.hidden = !createProblemForm.hidden;
-});
-document.getElementById("cancel-create-problem").addEventListener("click", () => {
-    createProblemForm.reset();
-    resetClassTestcases();
-    createProblemForm.hidden = true;
-    setMessage(problemMessage, "");
-});
 
-createProblemForm.addEventListener("submit", async (event) => {
+document.getElementById("add-problem-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const button = createProblemForm.querySelector('[type="submit"]');
+    const form = event.currentTarget;
+    const button = document.getElementById("add-problem-button");
+    const problemId = Number(new FormData(form).get("problem_id"));
+    if (!problemId) {
+        setMessage(document.getElementById("add-problem-message"), "Hãy chọn một bài tập.", true);
+        return;
+    }
     button.disabled = true;
-    const values = new FormData(createProblemForm);
-    const payload = {
-        problem_name: values.get("problem_name"),
-        description: values.get("description"),
-        input_description: values.get("input_description"),
-        output_description: values.get("output_description"),
-        time_limit: Number(values.get("time_limit")),
-        memory_limit: Number(values.get("memory_limit")),
-        access_modifier: "private",
-        testcases: [...createProblemForm.querySelectorAll("#class-testcase-list .testcase-row")].map((row) => ({
-            input_data: row.querySelector('[name="input_data"]').value,
-            expected_output: row.querySelector('[name="expected_output"]').value,
-            point: Number(row.querySelector('[name="point"]').value),
-        })),
-    };
     try {
-        const problem = await requestJson(`/admin/judge/academic-classes/${activeClassId}/problems/create`, {
+        await requestJson(`/admin/judge/academic-classes/${activeClassId}/problems`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ problem_id: problemId, is_required: false }),
         });
-        createProblemForm.reset();
-        resetClassTestcases();
-        createProblemForm.hidden = true;
-        setMessage(problemMessage, `Đã tạo và thêm "${problem.problem_name}" vào lớp.`);
         await openClass(activeClassId, false);
+        setMessage(document.getElementById("add-problem-message"), "Đã thêm bài tập vào lớp.");
     } catch (error) {
-        setMessage(problemMessage, error.message, true);
-    } finally {
+        setMessage(
+            document.getElementById("add-problem-message"),
+            error.message || "Không thể thêm bài tập vào lớp.",
+            true,
+        );
         button.disabled = false;
     }
 });
@@ -588,27 +610,6 @@ document.getElementById("create-contest-form").addEventListener("submit", async 
     }
 });
 
-document.getElementById("add-manager-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('[type="submit"]');
-    button.disabled = true;
-    try {
-        await requestJson(`/admin/judge/academic-classes/${activeClassId}/managers`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ account_id: Number(new FormData(form).get("account_id")) }),
-        });
-        form.reset();
-        setMessage(document.getElementById("manager-message"), "Đã cấp quyền quản lý lớp.");
-        await loadManagers(activeClassId, true);
-    } catch (error) {
-        setMessage(document.getElementById("manager-message"), error.message, true);
-    } finally {
-        button.disabled = false;
-    }
-});
-
 document.getElementById("logout-button").addEventListener("click", async () => {
     try {
         const response = await apiFetch("/auth/logout", { method: "POST" });
@@ -620,5 +621,3 @@ document.getElementById("logout-button").addEventListener("click", async () => {
 });
 
 initialize();
-document.getElementById("add-class-testcase").addEventListener("click", addClassTestcase);
-resetClassTestcases();

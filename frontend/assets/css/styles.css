@@ -298,6 +298,89 @@ h2 {
     padding: clamp(22px, 4vw, 34px);
 }
 
+.dashboard-shortcuts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: 14px;
+    margin: 18px 0;
+}
+
+.dashboard-shortcut {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 88px;
+    padding: 18px;
+    border: 1px solid #dce5f4;
+    border-radius: 14px;
+    color: #24365f;
+    background: #fff;
+    text-decoration: none;
+    transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.dashboard-shortcut:hover {
+    border-color: #9eb2ef;
+    box-shadow: 0 8px 20px rgb(39 67 128 / 9%);
+    transform: translateY(-2px);
+}
+
+.dashboard-shortcut-icon {
+    display: grid;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border-radius: 12px;
+    color: #3156bc;
+    background: #edf2ff;
+    font-size: 1.35rem;
+    font-weight: 750;
+}
+
+.dashboard-shortcut > span:nth-child(2) {
+    display: grid;
+    gap: 4px;
+}
+
+.dashboard-shortcut strong {
+    font-size: 1rem;
+}
+
+.dashboard-shortcut small {
+    color: #68758e;
+    font-size: 0.82rem;
+}
+
+.dashboard-shortcut-arrow {
+    margin-left: auto;
+    color: #526fd0;
+    font-size: 1.2rem;
+}
+
+.admin-problem-shortcut {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 18px;
+    border-color: #cbd8ff;
+    background: linear-gradient(110deg, #f1f5ff, #fff 75%);
+}
+
+.admin-problem-shortcut[hidden] {
+    display: none;
+}
+
+.admin-problem-shortcut h2 {
+    margin: 0 0 6px;
+    color: #1d2f5b;
+}
+
+.admin-problem-shortcut .page-subtitle {
+    margin: 0;
+}
+
 .stacked-panel-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
@@ -431,6 +514,15 @@ h2 {
 
 .entity-list li span {
     color: var(--muted);
+}
+
+.entity-list .status-badge {
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: #854d0e;
+    background: #fef3c7;
+    font-size: 0.78rem;
+    font-weight: 650;
 }
 
 .entity-list button {
@@ -584,6 +676,84 @@ h2 {
     font: inherit;
 }
 
+.manager-invite-picker {
+    display: grid;
+    gap: 8px;
+    margin: 14px 0 18px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #f8faff;
+}
+
+.manager-invite-picker label {
+    color: #334155;
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.manager-invite-picker input[type="search"] {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding: 10px 14px;
+    border: 1px solid #cbd7e8;
+    border-radius: 10px;
+    color: #172554;
+    background: #fff;
+    font: inherit;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.manager-invite-picker input[type="search"]::placeholder {
+    color: #94a3b8;
+}
+
+.manager-invite-picker input[type="search"]:focus {
+    border-color: #6685ed;
+    box-shadow: 0 0 0 4px rgb(49 86 217 / 10%);
+    outline: none;
+}
+
+.manager-invite-picker .field-hint {
+    margin: 0;
+}
+
+.manager-suggestions {
+    display: grid;
+    gap: 8px;
+}
+
+.manager-suggestions:empty {
+    display: none;
+}
+
+.manager-suggestions .field-hint {
+    margin: 0;
+}
+
+.classroom-workspace-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 320px);
+    align-items: start;
+    gap: 18px;
+}
+
+.member-sidebar {
+    position: sticky;
+    top: 20px;
+    max-height: min(72vh, 760px);
+    overflow-y: auto;
+}
+
+.member-sidebar[hidden] {
+    display: none;
+}
+
+.member-sidebar h3 {
+    margin-top: 0;
+}
+
 .discover-heading {
     margin-top: 34px;
 }
@@ -629,6 +799,177 @@ h2 {
 
 .problem-create-panel h3 {
     margin: 0;
+}
+
+.problem-authoring-layout {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.problem-authoring-form,
+.problem-preview-panel {
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #fbfcff;
+}
+
+.problem-authoring-form > h2,
+.problem-preview-toolbar h2 {
+    margin: 0;
+    color: #1d2f5b;
+}
+
+.problem-authoring-form code {
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: #24365f;
+    background: #eaf0ff;
+}
+
+.latex-autocomplete {
+    position: fixed;
+    z-index: 20;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 5px;
+    border: 1px solid #cbd6eb;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgb(22 38 74 / 18%);
+}
+
+.latex-autocomplete[hidden] {
+    display: none;
+}
+
+.latex-autocomplete-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-height: 36px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    color: #334155;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.latex-autocomplete-option[aria-selected="true"],
+.latex-autocomplete-option:hover {
+    color: #1d2f5b;
+    background: #edf2ff;
+}
+
+.latex-autocomplete-option code {
+    color: #293d70;
+    font-weight: 700;
+}
+
+.latex-autocomplete-option span {
+    color: #68758e;
+    font-size: 0.8rem;
+}
+
+.problem-preview-panel {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    background: #f3f6fc;
+}
+
+.problem-preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.problem-preview-toolbar .eyebrow {
+    margin: 0 0 4px;
+}
+
+.preview-live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #52617d;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.preview-live-indicator span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #20a36a;
+    box-shadow: 0 0 0 3px rgb(32 163 106 / 12%);
+}
+
+.problem-statement-preview {
+    padding: clamp(18px, 3vw, 30px);
+    border: 1px solid #e4e9f2;
+    border-radius: 12px;
+    color: #263248;
+    background: #fff;
+    box-shadow: 0 8px 22px rgb(39 67 128 / 5%);
+}
+
+.problem-statement-preview > h1 {
+    margin: 0 0 22px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e8edf5;
+    color: #172554;
+    font-size: clamp(1.25rem, 2vw, 1.65rem);
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.problem-statement-preview section + section {
+    margin-top: 20px;
+}
+
+.problem-statement-preview section h2 {
+    margin: 0 0 8px;
+    color: #24365f;
+    font-size: 1rem;
+}
+
+.problem-statement-preview p {
+    margin: 0;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+
+.problem-statement-preview .preview-content {
+    min-height: 1.7em;
+    white-space: pre-wrap;
+}
+
+.problem-statement-preview .preview-placeholder {
+    color: #94a0b4;
+    font-style: italic;
+}
+
+.problem-statement-preview mjx-container {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.preview-renderer-message {
+    margin: 12px 2px 0;
+    font-size: 0.78rem;
 }
 
 .classroom-tools {
@@ -884,7 +1225,8 @@ tbody tr:last-child td {
     }
 
     .dashboard-header,
-    .dashboard-footer {
+    .dashboard-footer,
+    .admin-problem-shortcut {
         align-items: stretch;
         flex-direction: column;
     }
@@ -899,6 +1241,15 @@ tbody tr:last-child td {
 
     .split-fields {
         grid-template-columns: 1fr;
+    }
+
+    .classroom-workspace-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .member-sidebar {
+        position: static;
+        max-height: none;
     }
 
     .classroom-section-heading,

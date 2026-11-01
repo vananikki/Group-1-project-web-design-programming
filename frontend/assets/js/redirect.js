@@ -1,4 +1,4 @@
-import { apiFetch } from "./api.js?v=20261021b";
+import { apiFetch } from "./api.js?v=20261029a";
 
 const statusText = document.getElementById("redirect-status");
 const goLoginButton = document.getElementById("go-login");
