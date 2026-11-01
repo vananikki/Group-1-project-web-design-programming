@@ -3,6 +3,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum as SQLAlchemyEnum,
@@ -689,6 +690,11 @@ class Submission(Base):
         nullable=True,
     )
 
+    class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("academic_class.class_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     language_id: Mapped[int] = mapped_column(
         ForeignKey("language.language_id"),
         nullable=False,
@@ -710,7 +716,34 @@ class Submission(Base):
         nullable=True,
     )
 
+    source_code_encoded: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
     score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    passed_testcases: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    total_testcases: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    runtime_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    memory_kb: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )

@@ -1,5 +1,6 @@
 import { apiFetch, readResponse } from "./api.js?v=20261029a";
 import { typesetMath } from "./latex.js?v=20261101b";
+import { renderSubmissionHistory } from "./submission_history.js?v=20261102a";
 
 const publicList = document.getElementById("public-problem-list");
 const ownedList = document.getElementById("owned-problem-list");
@@ -9,6 +10,8 @@ const solutionForm = document.getElementById("solution-form");
 let account;
 let activeProblemId;
 let languagesPromise;
+const historyPageSize = 50;
+let historyOffset = 0;
 
 function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -75,19 +78,16 @@ async function loadLanguages() {
     }
 }
 
-async function loadSubmissionHistory() {
-    const history = await requestJson("/student/submissions");
+async function loadSubmissionHistory({ append = false } = {}) {
+    const offset = append ? historyOffset : 0;
+    const history = await requestJson(
+        `/student/submissions?limit=${historyPageSize}&offset=${offset}`,
+    );
     const list = document.getElementById("submission-history");
-    list.innerHTML = history.map((submission) => `<div class="entity-row">
-        <span>
-            <strong>${escapeHtml(submission.problem_name)}</strong>
-            <small>${submission.access_modifier === "public" ? "Public" : "Private"} · ${submission.contest_name ? `${escapeHtml(submission.contest_name)} · ` : ""}${new Date(submission.submitted_at).toLocaleString()}</small>
-        </span>
-        <span class="submission-summary">
-            <span class="status-pill ${submission.status === "Accepted" ? "" : "pending"}">${escapeHtml(submission.status)}</span>
-            <strong>${escapeHtml(submission.score ?? 0)} điểm</strong>
-        </span>
-    </div>`).join("") || `<p class="field-hint">Bạn chưa nộp bài nào.</p>`;
+    renderSubmissionHistory(list, history, { append });
+    historyOffset = offset + history.length;
+    document.getElementById("submission-history-more").hidden =
+        history.length < historyPageSize;
 }
 
 async function openProblem(problemId, button) {
@@ -185,7 +185,7 @@ solutionForm.addEventListener("submit", async (event) => {
         );
         setMessage(
             resultElement,
-            `${result.status} · ${result.score} điểm · ${result.passed_testcases}/${result.total_testcases} test case`,
+            `${result.status} · ${result.score} điểm · ${result.passed_testcases}/${result.total_testcases} test case · tổng ${result.runtime_ms == null ? "—" : `${result.runtime_ms} ms`} · bộ nhớ đỉnh ${result.memory_kb == null ? "—" : `${result.memory_kb} KB`}`,
             result.status !== "Accepted",
         );
         try {
@@ -196,6 +196,19 @@ solutionForm.addEventListener("submit", async (event) => {
         }
     } catch (error) {
         setMessage(resultElement, error.message || "Không thể chấm lời giải.", true);
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.getElementById("submission-history-more").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+        await loadSubmissionHistory({ append: true });
+    } catch (error) {
+        console.error(error);
+        setMessage(pageMessage, error.message || "Không thể tải thêm lịch sử nộp bài.", true);
     } finally {
         button.disabled = false;
     }

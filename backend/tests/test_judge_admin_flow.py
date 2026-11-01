@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import base64
 
 import pytest
 from fastapi.testclient import TestClient
@@ -677,6 +678,7 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
     _set_session(other_student_id, "other-history-student-session")
     with TestingSessionLocal() as db:
         student = Student(account_id=student_id)
+        other_student = Student(account_id=other_student_id)
         first_class = AcademicClass(class_name="History class one")
         second_class = AcademicClass(class_name="History class two")
         public_problem = Problem(
@@ -694,6 +696,7 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
         db.add_all(
             [
                 student,
+                other_student,
                 first_class,
                 second_class,
                 public_problem,
@@ -706,6 +709,10 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
             [
                 StudentClass(class_id=first_class.class_id, student_id=student.student_id),
                 StudentClass(class_id=second_class.class_id, student_id=student.student_id),
+                StudentClass(
+                    class_id=first_class.class_id,
+                    student_id=other_student.student_id,
+                ),
                 AcademicClassProblem(
                     class_id=first_class.class_id,
                     problem_id=public_problem.problem_id,
@@ -775,24 +782,40 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
         cookies=student_cookies,
     )
     assert private_submission.status_code == 200, private_submission.text
+    other_class_submission = client.post(
+        f"/student/classes/{first_class_id}/problems/{public_problem_id}/submissions",
+        json={**submission_payload, "source_code": "print('other')"},
+        cookies={"session_id": "other-history-student-session"},
+    )
+    assert other_class_submission.status_code == 200, other_class_submission.text
 
     submission_history = client.get("/student/submissions", cookies=student_cookies)
     assert submission_history.status_code == 200, submission_history.text
     assert [item["problem_id"] for item in submission_history.json()] == [
+        public_problem_id,
         private_problem_id,
         public_problem_id,
         public_problem_id,
     ]
     assert [item["status"] for item in submission_history.json()] == [
+        "Wrong Answer",
         "Accepted",
         "Wrong Answer",
         "Accepted",
     ]
     assert [item["access_modifier"] for item in submission_history.json()] == [
+        "public",
         "private",
         "public",
         "public",
     ]
+    assert [item["is_mine"] for item in submission_history.json()] == [
+        False,
+        True,
+        True,
+        True,
+    ]
+    assert submission_history.json()[0]["account_name"] == "other-history-student"
     assert all("source_code" not in item for item in submission_history.json())
     assert client.get("/student/submissions").status_code == 401
     other_history = client.get(
@@ -800,7 +823,22 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
         cookies={"session_id": "other-history-student-session"},
     )
     assert other_history.status_code == 200
-    assert other_history.json() == []
+    assert len(other_history.json()) == 4
+    assert other_history.json()[0]["is_mine"] is True
+    assert client.get(
+        f"/student/submissions?limit=1&offset=1",
+        cookies=student_cookies,
+    ).json()[0]["is_mine"] is True
+    assert client.get(
+        f"/student/submissions/{other_class_submission.json()['submission_id']}/source",
+        cookies=student_cookies,
+    ).status_code == 404
+    own_source = client.get(
+        f"/student/submissions/{public_submission.json()['submission_id']}/source",
+        cookies=student_cookies,
+    )
+    assert own_source.status_code == 200, own_source.text
+    assert own_source.json()["source_code"] == "print('wrong')"
 
     first_class_history = client.get(
         f"/student/classes/{first_class_id}/submissions",
@@ -812,19 +850,140 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
     )
     assert first_class_history.status_code == 200, first_class_history.text
     assert second_class_history.status_code == 200, second_class_history.text
+    assert client.get(
+        f"/student/classes/{second_class_id}/submissions",
+        cookies={"session_id": "other-history-student-session"},
+    ).status_code == 403
     assert {item["problem_id"] for item in first_class_history.json()} == {
         public_problem_id,
         private_problem_id,
     }
-    assert {item["problem_id"] for item in second_class_history.json()} == {
-        public_problem_id,
+    assert len(first_class_history.json()) == 3
+    assert {item["account_name"] for item in first_class_history.json()} == {
+        "history-student",
+        "other-history-student",
     }
+    assert second_class_history.json() == []
     assert all(
         "source_code" not in item
         for item in first_class_history.json() + second_class_history.json()
     )
     with TestingSessionLocal() as db:
         assert db.query(Submission).filter_by(account_id=student_id).count() == 3
+
+
+def test_submission_stores_aggregate_verdict_and_judge0_metrics(monkeypatch):
+    student_id = _create_account("metrics-student@example.com", AccountRole.USER)
+    _set_session(student_id, "metrics-student-session")
+    results = iter(
+        [
+            {
+                "status": {"id": 3, "description": "Accepted"},
+                "stdout": "expected 1",
+                "time": "0.01",
+                "memory": 100,
+            },
+            {
+                "status": {"id": 4, "description": "Wrong Answer"},
+                "stdout": "wrong",
+                "time": "0.02",
+                "memory": 120,
+            },
+            {
+                "status": {"id": 7, "description": "Runtime Error (SIGSEGV)"},
+                "time": "0.5",
+                "memory": 140,
+            },
+            {
+                "status": {"id": 7, "description": "Runtime Error (SIGSEGV)"},
+                "time": "0.03",
+                "memory": 130,
+            },
+            {
+                "status": {"id": 5, "description": "Time Limit Exceeded"},
+                "time": "1.0",
+                "memory": 150,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        judge_admin,
+        "_run_judge0",
+        lambda *args, **kwargs: next(results),
+    )
+    with TestingSessionLocal() as db:
+        db.add(Language(language_id=74, name="Python (metrics test)"))
+        problem = Problem(
+            problem_name="Submission metrics",
+            time_limit=1,
+            memory_limit=128,
+            access_modifier=AccessModifier.PUBLIC,
+        )
+        db.add(problem)
+        db.flush()
+        db.add_all(
+            [
+                JudgeTestcase(
+                    problem_id=problem.problem_id,
+                    point=20,
+                    input_data=str(index),
+                    expected_output="expected 1" if index == 0 else "expected",
+                )
+                for index in range(5)
+            ]
+        )
+        problem_id = problem.problem_id
+        db.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        f"/student/problems/{problem_id}/submissions",
+        json={"language_id": 74, "source_code": "print('test')"},
+        cookies={"session_id": "metrics-student-session"},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "Runtime Error (SIGSEGV)"
+    assert result["score"] == 20
+    assert result["passed_testcases"] == 1
+    assert result["total_testcases"] == 5
+    assert result["runtime_ms"] == 560
+    assert result["memory_kb"] == 150
+    assert [case["status"] for case in result["testcases"]] == [
+        "Accepted",
+        "Wrong Answer",
+        "Runtime Error (SIGSEGV)",
+        "Runtime Error (SIGSEGV)",
+        "Time Limit Exceeded",
+    ]
+
+    history = client.get(
+        "/student/submissions",
+        cookies={"session_id": "metrics-student-session"},
+    )
+    assert history.status_code == 200, history.text
+    assert {
+        key: history.json()[0][key]
+        for key in (
+            "passed_testcases",
+            "total_testcases",
+            "runtime_ms",
+            "memory_kb",
+        )
+    } == {
+        "passed_testcases": 1,
+        "total_testcases": 5,
+        "runtime_ms": 560,
+        "memory_kb": 150,
+    }
+    with TestingSessionLocal() as db:
+        submission = db.query(Submission).one()
+        assert submission.status == "Runtime Error (SIGSEGV)"
+        assert submission.score == 20
+        assert submission.passed_testcases == 1
+        assert submission.total_testcases == 5
+        assert submission.runtime_ms == 560
+        assert submission.memory_kb == 150
 
 
 def test_class_managers_attach_existing_owned_or_public_problems():
@@ -1313,7 +1472,10 @@ def test_enrolled_student_can_submit_source_code_for_class_problem(monkeypatch):
     ).json()[0]["language_id"] == 71
     with TestingSessionLocal() as db:
         submission = db.query(Submission).one()
-        assert submission.source_code == submission_body["source_code"]
+        assert submission.source_code == base64.b64encode(
+            submission_body["source_code"].encode("utf-8")
+        ).decode("ascii")
+        assert submission.source_code_encoded is True
         assert submission.contest_id == contest_id
 
 

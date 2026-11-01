@@ -1,4 +1,5 @@
 import { apiFetch, readResponse } from "./api.js?v=20261029a";
+import { renderSubmissionHistory } from "./submission_history.js?v=20261102a";
 
 const logoutButton = document.getElementById("logout-button");
 const logoutError = document.getElementById("logout-error");
@@ -8,7 +9,36 @@ const editNameButton = document.getElementById("edit-name-button");
 const saveNameButton = document.getElementById("save-name-button");
 const cancelNameButton = document.getElementById("cancel-name-button");
 const profileMessage = document.getElementById("profile-message");
+const serverHistoryList = document.getElementById("server-submission-history");
+const serverHistoryMessage = document.getElementById("server-submission-message");
+const serverHistoryMore = document.getElementById("server-submission-more");
+const historyPageSize = 50;
+let historyOffset = 0;
 let currentAccount;
+
+async function loadServerHistory({ append = false } = {}) {
+    serverHistoryMore.disabled = true;
+    serverHistoryMessage.textContent = "";
+    try {
+        const offset = append ? historyOffset : 0;
+        const response = await apiFetch(
+            `/student/submissions?limit=${historyPageSize}&offset=${offset}`,
+        );
+        const data = await readResponse(response);
+        if (!response.ok) {
+            throw new Error(data.detail || `Không thể tải lịch sử nộp bài (${response.status})`);
+        }
+        renderSubmissionHistory(serverHistoryList, data, { append });
+        historyOffset = offset + data.length;
+        serverHistoryMore.hidden = data.length < historyPageSize;
+    } catch (error) {
+        console.error(error);
+        serverHistoryMessage.textContent =
+            error instanceof Error ? error.message : "Không thể tải lịch sử nộp bài.";
+    } finally {
+        serverHistoryMore.disabled = false;
+    }
+}
 
 function setNameEditMode(enabled) {
     accountName.hidden = enabled;
@@ -56,11 +86,14 @@ async function loadAccount() {
             currentAccount.role !== "ADMIN" && currentAccount.role !== "SUPER_ADMIN";
         document.getElementById("admin-problem-tools").hidden =
             currentAccount.role !== "ADMIN" && currentAccount.role !== "SUPER_ADMIN";
+        await loadServerHistory();
     } catch (error) {
         console.error(error);
         window.location.replace("login.html");
     }
 }
+
+serverHistoryMore.addEventListener("click", () => loadServerHistory({ append: true }));
 
 editNameButton.addEventListener("click", () => {
     accountNameInput.value = currentAccount.account_name;

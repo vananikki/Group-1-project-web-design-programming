@@ -210,7 +210,7 @@ async function loadSubmissions(submissionId = "") {
         return;
     }
     renderList(lists.submission, data, (submission) =>
-        `<strong>#${escapeHtml(submission.submission_id)}</strong> ${escapeHtml(submission.problem_name)} · ${escapeHtml(submission.account_name)} · ${escapeHtml(submission.status)} <button type="button" class="secondary" data-delete-submission="${escapeHtml(submission.submission_id)}">Xóa</button>`,
+        `<strong>#${escapeHtml(submission.submission_id)}</strong> ${escapeHtml(submission.problem_name)} · ${escapeHtml(submission.account_name)} · ${escapeHtml(submission.status)} · ${escapeHtml(submission.score ?? 0)} điểm · ${submission.passed_testcases ?? "—"}/${submission.total_testcases ?? "—"} test · tổng ${submission.runtime_ms == null ? "—" : `${submission.runtime_ms} ms`} · bộ nhớ đỉnh ${submission.memory_kb == null ? "—" : `${submission.memory_kb} KB`} <button type="button" class="secondary" data-delete-submission="${escapeHtml(submission.submission_id)}">Xóa</button>`,
     );
 }
 

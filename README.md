@@ -73,6 +73,8 @@ The current backend is responsible for:
 - class detail and contest detail APIs for problem and standings summaries
 - database access through SQLAlchemy
 
+Authenticated users can view a paginated server-wide submission feed, including private-problem submission statuses. Source code is only returned by an ownership-checked endpoint for the submitter. Class submission history is scoped to submissions made through that class and is visible only to enrolled students.
+
 Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. They can also practice public problems from the problem bank without joining a class. Administrators create problems in their own library from a separate editor; only the owner (or a super admin) can view and edit a problem's test cases. Public problems appear in the shared practice library, while private problems are only visible to students through classes where they have been assigned. Class administrators approve enrollment requests and manage class-specific administrator permissions. Class owners can search active administrator accounts by name or email and invite them to a class. Class ownership reuses the existing `manage_class` relation; the first administrator assigned to a class is its owner. Only administrators assigned to a class can access it, and only its owner (the primary administrator) can review student join requests. Requests remain pending until the owner approves or rejects them. A new `class_join_request` table records approval requests. Submissions are executed by the configured Judge0 service, never by the web server. The upgrade migration creates missing model tables and adds the contest and source-code fields to an existing `submission` table.
 
 ---
@@ -97,7 +99,7 @@ For an existing database, run `migrate_judge_admin.py` before starting the backe
 The migration also allows deleting accounts without losing judge history: authored problems, contests, and submissions are retained with the deleted account reference cleared.
 Problems without an owner are marked “Ẩn danh” in judge management. Only super admins can delete problems; deletion also permanently removes their test cases, solutions, class/contest links, and submissions.
 Super admins can also delete classes, contests, and individual submissions. Deleting a class removes its memberships and links while keeping shared problems and contests; deleting a contest removes its submissions and links while keeping its problems. No account can delete itself; the final super-admin account is also protected from deletion by another super admin.
-To enable code submissions, run a Judge0 instance, set `JUDGE0_URL` in the backend environment, and sync its language list with `PYTHONPATH=. .venv/bin/python db/initialize_languages.py`. The UI reports a service error when Judge0 is not reachable; submitted source code is never executed in the FastAPI process.
+To enable code submissions, run a Judge0 instance, set `JUDGE0_URL` in the backend environment, and sync its language list with `PYTHONPATH=. .venv/bin/python db/initialize_languages.py`. Source code is stored in the database as Base64 text; this is an encoding, not encryption. The judge migration converts existing plain-text submissions once and records their encoding state to avoid double conversion. Each submission stores its status, score, passed/total testcase counts, summed runtime for non-time-limit-exceeded testcases, and peak reported memory. Judge0 runtime is reported in seconds and converted to milliseconds; memory is reported in KB. The UI reports a service error when Judge0 is not reachable; submitted source code is never executed in the FastAPI process.
 
 ### 2) Frontend
 
@@ -343,7 +345,9 @@ The main backend routes currently cover:
 | `GET` | `/student/classes/{class_id}` | View class problems and contests after approval |
 | `GET` | `/student/classes/{class_id}/contests/{contest_id}` | View contest problems and eligibility window |
 | `GET` | `/student/classes/{class_id}/contests/{contest_id}/standings` | View live standings |
-| `GET` | `/student/classes/{class_id}/submissions` | View the student's submission history for a class |
+| `GET` | `/student/submissions` | View paginated server-wide statuses; source code is omitted |
+| `GET` | `/student/submissions/{submission_id}/source` | View source code only when the caller owns the submission |
+| `GET` | `/student/classes/{class_id}/submissions` | View paginated submissions made in a joined class |
 | `GET` | `/student/languages` | List configured Judge0 languages |
 | `POST` | `/student/classes/{class_id}/problems/{problem_id}/submissions` | Submit source code to Judge0 and save the result |
 

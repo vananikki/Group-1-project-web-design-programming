@@ -4,6 +4,7 @@ import base64
 import os
 import time
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 import httpx
@@ -111,6 +112,24 @@ def _run_judge0(
             time.sleep(min(0.5, max(0, deadline - time.monotonic())))
 
     raise TimeoutError("Judge0 grading exceeded the 45-second request limit")
+
+
+def _judge0_metric(value: Any, field: str) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        metric = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"Judge0 returned an invalid {field} value") from exc
+    if not metric.is_finite() or metric < 0:
+        raise ValueError(f"Judge0 returned an invalid {field} value")
+    return metric
+
+
+def _metric_as_int(value: Decimal | None) -> int | None:
+    if value is None:
+        return None
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _require_admin_account(session_id: str | None, session: Session) -> Account:
@@ -1063,6 +1082,8 @@ def get_student_contest_standings(
 @student_router.get("/classes/{class_id}/submissions")
 def list_student_submissions(
     class_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
@@ -1076,19 +1097,19 @@ def list_student_submissions(
     ) is None:
         raise HTTPException(status_code=403, detail="Bạn chưa tham gia lớp này")
     rows = session.execute(
-        select(Submission, Problem.problem_name, Contest.contest_name)
+        select(
+            Submission,
+            Problem.problem_name,
+            Contest.contest_name,
+            Account.account_name,
+        )
         .join(Problem, Problem.problem_id == Submission.problem_id)
         .outerjoin(Contest, Contest.contest_id == Submission.contest_id)
-        .join(
-            AcademicClassProblem,
-            AcademicClassProblem.problem_id == Submission.problem_id,
-        )
-        .where(
-            AcademicClassProblem.class_id == class_id,
-            Submission.account_id == account.account_id,
-        )
-        .order_by(Submission.submitted_at.desc())
-        .limit(100)
+        .outerjoin(Account, Account.account_id == Submission.account_id)
+        .where(Submission.class_id == class_id)
+        .order_by(Submission.submitted_at.desc(), Submission.submission_id.desc())
+        .limit(limit)
+        .offset(offset)
     ).all()
     return [
         {
@@ -1097,11 +1118,17 @@ def list_student_submissions(
             "problem_name": problem_name,
             "contest_id": submission.contest_id,
             "contest_name": contest_name,
+            "account_name": account_name or "Ẩn danh",
+            "is_mine": submission.account_id == account.account_id,
             "status": submission.status,
             "score": submission.score,
+            "passed_testcases": submission.passed_testcases,
+            "total_testcases": submission.total_testcases,
+            "runtime_ms": submission.runtime_ms,
+            "memory_kb": submission.memory_kb,
             "submitted_at": _as_utc(submission.submitted_at).isoformat(),
         }
-        for submission, problem_name, contest_name in rows
+        for submission, problem_name, contest_name, account_name in rows
     ]
 
 
@@ -1137,7 +1164,9 @@ def submit_solution(
         if not (_as_utc(contest.start_time) <= now <= _as_utc(contest.end_time)):
             raise HTTPException(status_code=409, detail="Cuộc thi chưa bắt đầu hoặc đã kết thúc")
 
-    return _grade_and_store_submission(account, problem, payload, contest, session)
+    return _grade_and_store_submission(
+        account, problem, payload, contest, session, class_id=class_id
+    )
 
 
 def _grade_and_store_submission(
@@ -1146,6 +1175,7 @@ def _grade_and_store_submission(
     payload: StudentSubmissionIn,
     contest: Contest | None,
     session: Session,
+    class_id: int | None = None,
 ) -> dict[str, Any]:
     language = session.get(Language, payload.language_id)
     if language is None:
@@ -1162,6 +1192,10 @@ def _grade_and_store_submission(
 
     testcase_results = []
     score = 0
+    passed_testcases = 0
+    total_runtime_ms = Decimal(0)
+    has_runtime_measurement = False
+    peak_memory_kb: Decimal | None = None
     grading_deadline = time.monotonic() + 45
     try:
         for testcase in testcases:
@@ -1176,21 +1210,41 @@ def _grade_and_store_submission(
                 deadline=grading_deadline,
             )
             status = result.get("status", {})
+            status_id = status.get("id")
             passed = (
-                status.get("id") == 3
+                status_id == 3
                 and str(result.get("stdout") or "").rstrip()
                 == testcase.expected_output.rstrip()
             )
             if passed:
                 score += testcase.point
+                passed_testcases += 1
+            case_status = (
+                "Accepted"
+                if passed
+                else (
+                    "Wrong Answer"
+                    if status_id == 3
+                    else status.get("description", "Unknown")
+                )
+            )
+            runtime = _judge0_metric(result.get("time"), "runtime")
+            memory = _judge0_metric(result.get("memory"), "memory")
+            if runtime is not None and status_id != 5:
+                total_runtime_ms += runtime * 1000
+                has_runtime_measurement = True
+            if memory is not None:
+                peak_memory_kb = max(peak_memory_kb or memory, memory)
             testcase_results.append(
                 {
-                    "status": status.get("description", "Unknown"),
+                    "status": case_status,
                     "passed": passed,
+                    "runtime_ms": _metric_as_int(runtime * 1000)
+                    if runtime is not None and status_id != 5
+                    else None,
+                    "memory_kb": _metric_as_int(memory),
                 }
             )
-            if status.get("id") != 3:
-                break
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=503,
@@ -1201,29 +1255,34 @@ def _grade_and_store_submission(
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="Phản hồi từ Judge0 không hợp lệ") from exc
 
-    all_passed = len(testcase_results) == len(testcases) and all(
-        item["passed"] for item in testcase_results
+    all_passed = passed_testcases == len(testcases)
+    failed_statuses = [
+        item["status"] for item in testcase_results if not item["passed"]
+    ]
+    submission_status = "Accepted" if all_passed else max(
+        dict.fromkeys(failed_statuses),
+        key=failed_statuses.count,
     )
-    submission_status = (
-        "Accepted"
-        if all_passed
-        else next(
-            (
-                item["status"]
-                for item in testcase_results
-                if item["status"] != "Accepted"
-            ),
-            "Wrong Answer",
-        )
+    runtime_ms = (
+        _metric_as_int(total_runtime_ms) if has_runtime_measurement else None
     )
+    memory_kb = _metric_as_int(peak_memory_kb)
     submission = Submission(
         problem_id=problem.problem_id,
         account_id=account.account_id,
         language_id=language.language_id,
         contest_id=contest.contest_id if contest else None,
+        class_id=class_id,
         status=submission_status,
         score=score,
-        source_code=payload.source_code,
+        passed_testcases=passed_testcases,
+        total_testcases=len(testcases),
+        runtime_ms=runtime_ms,
+        memory_kb=memory_kb,
+        source_code=base64.b64encode(payload.source_code.encode("utf-8")).decode(
+            "ascii"
+        ),
+        source_code_encoded=True,
     )
     session.add(submission)
     session.commit()
@@ -1232,8 +1291,10 @@ def _grade_and_store_submission(
         "submission_id": submission.submission_id,
         "status": submission.status,
         "score": score,
-        "passed_testcases": sum(item["passed"] for item in testcase_results),
+        "passed_testcases": passed_testcases,
         "total_testcases": len(testcases),
+        "runtime_ms": runtime_ms,
+        "memory_kb": memory_kb,
         "testcases": testcase_results,
     }
 
@@ -1266,6 +1327,8 @@ def list_public_problems(
 
 @student_router.get("/submissions")
 def list_student_submission_history(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
@@ -1276,12 +1339,14 @@ def list_student_submission_history(
             Problem.problem_name,
             Problem.access_modifier,
             Contest.contest_name,
+            Account.account_name,
         )
         .join(Problem, Problem.problem_id == Submission.problem_id)
         .outerjoin(Contest, Contest.contest_id == Submission.contest_id)
-        .where(Submission.account_id == account.account_id)
+        .outerjoin(Account, Account.account_id == Submission.account_id)
         .order_by(Submission.submitted_at.desc(), Submission.submission_id.desc())
-        .limit(100)
+        .limit(limit)
+        .offset(offset)
     ).all()
     return [
         {
@@ -1291,12 +1356,44 @@ def list_student_submission_history(
             "access_modifier": access_modifier.value,
             "contest_id": submission.contest_id,
             "contest_name": contest_name,
+            "account_name": account_name or "Ẩn danh",
+            "is_mine": submission.account_id == account.account_id,
             "status": submission.status,
             "score": submission.score,
+            "passed_testcases": submission.passed_testcases,
+            "total_testcases": submission.total_testcases,
+            "runtime_ms": submission.runtime_ms,
+            "memory_kb": submission.memory_kb,
             "submitted_at": _as_utc(submission.submitted_at).isoformat(),
         }
-        for submission, problem_name, access_modifier, contest_name in rows
+        for submission, problem_name, access_modifier, contest_name, account_name in rows
     ]
+
+
+@student_router.get("/submissions/{submission_id}/source")
+def get_own_submission_source(
+    submission_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_authenticated_account(session_id, session)
+    submission = session.get(Submission, submission_id)
+    if submission is None or submission.account_id != account.account_id:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài nộp")
+    if not submission.source_code:
+        raise HTTPException(status_code=404, detail="Bài nộp không có mã nguồn")
+    try:
+        source_code = (
+            base64.b64decode(submission.source_code, validate=True).decode("utf-8")
+            if submission.source_code_encoded
+            else submission.source_code
+        )
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Không thể giải mã mã nguồn của bài nộp",
+        ) from exc
+    return {"submission_id": submission.submission_id, "source_code": source_code}
 
 
 @student_router.get("/problems/{problem_id}")
@@ -1622,6 +1719,10 @@ def list_submissions(
             "contest_id": submission.contest_id,
             "status": submission.status,
             "score": submission.score,
+            "passed_testcases": submission.passed_testcases,
+            "total_testcases": submission.total_testcases,
+            "runtime_ms": submission.runtime_ms,
+            "memory_kb": submission.memory_kb,
             "submitted_at": _as_utc(submission.submitted_at).isoformat(),
         }
         for submission, problem_name, account_name in rows
