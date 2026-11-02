@@ -40,6 +40,7 @@ if not DATABASE_URL:
 class AccessModifier(str, Enum):
     PRIVATE = "private"
     PUBLIC = "public"
+    HIDDEN = "hidden"
 
 
 

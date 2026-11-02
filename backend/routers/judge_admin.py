@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -9,7 +10,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
-from sqlalchemy import delete, select, or_
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from db.schemas import (
@@ -168,8 +169,8 @@ def _require_authenticated_account(session_id: str | None, session: Session) -> 
 
 def _require_student_account(session_id: str | None, session: Session) -> Account:
     account = _require_authenticated_account(session_id, session)
-    if account.role != AccountRole.USER:
-        raise HTTPException(status_code=403, detail="Chức năng này dành cho học viên")
+    if account.role not in {AccountRole.USER, AccountRole.ADMIN, AccountRole.SUPER_ADMIN}:
+        raise HTTPException(status_code=403, detail="Chức năng này dành cho học viên hoặc quản trị viên được mời vào lớp")
     return account
 
 
@@ -282,14 +283,71 @@ def _contest_status(contest: Contest) -> str:
     return "finished"
 
 
+def _contest_hidden_problem_visible_to_student(
+    session: Session,
+    account: Account,
+    contest: Contest,
+    problem: Problem,
+    class_id: int,
+) -> bool:
+    if problem.access_modifier != AccessModifier.HIDDEN:
+        return True
+    if problem.created_by == account.account_id:
+        return True
+    now = datetime.now(timezone.utc)
+    if now < _as_utc(contest.start_time):
+        return False
+    membership = session.scalar(
+        select(StudentClass.student_id).where(
+            StudentClass.class_id == class_id,
+            StudentClass.student_id == select(Student.student_id).where(
+                Student.account_id == account.account_id,
+            ).scalar_subquery(),
+        )
+    )
+    return membership is not None
+
+
+def _search_problems(stmt, query: str | None):
+    normalized_query = (query or "").strip().lower()
+    if not normalized_query:
+        return stmt
+
+    tokens = list(dict.fromkeys(re.findall(r"[^\W_]+", normalized_query)))
+    normalized_name = func.lower(Problem.problem_name)
+    phrase_match = normalized_name.contains(normalized_query, autoescape=True)
+    token_matches = [
+        normalized_name.contains(token, autoescape=True)
+        for token in tokens
+    ]
+    relevance = case(
+        (normalized_name == normalized_query, 100),
+        (normalized_name.startswith(normalized_query, autoescape=True), 80),
+        (phrase_match, 60),
+        else_=0,
+    )
+    for matched in token_matches:
+        relevance = relevance + case(
+            (matched, 12),
+            else_=0,
+        )
+
+    if token_matches:
+        search_match = or_(phrase_match, and_(*token_matches))
+    else:
+        search_match = phrase_match
+    return stmt.where(search_match).order_by(relevance.desc(), Problem.problem_id.desc())
+
+
 @router.get("/problems")
 def list_problems(
+    q: str | None = Query(default=None, max_length=100),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
     account = _require_admin_account(session_id, session)
 
-    stmt = select(Problem).options(selectinload(Problem.creator)).order_by(Problem.problem_id.desc())
+    stmt = select(Problem).options(selectinload(Problem.creator))
     if account.role != AccountRole.SUPER_ADMIN:
         stmt = stmt.where(
             or_(
@@ -298,6 +356,9 @@ def list_problems(
             )
         )
 
+    stmt = _search_problems(stmt, q)
+    if not q or not q.strip():
+        stmt = stmt.order_by(Problem.problem_id.desc())
     problems = session.scalars(stmt).all()
     return [_serialize_problem(problem) for problem in problems]
 
@@ -904,10 +965,14 @@ def get_student_class(
         )
         .where(AcademicClass.class_id == class_id)
     )
-    return {
-        "class_id": academic_class.class_id,
-        "class_name": academic_class.class_name,
-        "problems": [
+    visible_problems = []
+    for item in academic_class.class_problems:
+        if (
+            item.problem.access_modifier == AccessModifier.HIDDEN
+            and item.problem.created_by != account.account_id
+        ):
+            continue
+        visible_problems.append(
             {
                 "problem_id": item.problem.problem_id,
                 "problem_name": item.problem.problem_name,
@@ -919,8 +984,11 @@ def get_student_class(
                 "memory_limit": item.problem.memory_limit,
                 "is_required": item.is_required,
             }
-            for item in academic_class.class_problems
-        ],
+        )
+    return {
+        "class_id": academic_class.class_id,
+        "class_name": academic_class.class_name,
+        "problems": visible_problems,
         "contests": [
             {
                 "contest_id": item.contest.contest_id,
@@ -975,15 +1043,21 @@ def get_student_contest(
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc thi")
     status = _contest_status(contest)
     now = datetime.now(timezone.utc)
-    return {
-        "contest_id": contest.contest_id,
-        "contest_name": contest.contest_name,
-        "description": contest.description,
-        "start_time": _as_utc(contest.start_time).isoformat(),
-        "end_time": _as_utc(contest.end_time).isoformat(),
-        "status": status,
-        "can_submit": status == "active",
-        "problems": [
+    visible_problems = []
+    for item in contest.contest_problems:
+        if (
+            item.problem.access_modifier == AccessModifier.HIDDEN
+            and item.problem.created_by != account.account_id
+            and not _contest_hidden_problem_visible_to_student(
+                session,
+                account,
+                contest,
+                item.problem,
+                class_id,
+            )
+        ):
+            continue
+        visible_problems.append(
             {
                 "problem_id": item.problem_id,
                 "problem_name": item.problem.problem_name,
@@ -1005,8 +1079,16 @@ def get_student_contest(
                     )
                 ),
             }
-            for item in contest.contest_problems
-        ],
+        )
+    return {
+        "contest_id": contest.contest_id,
+        "contest_name": contest.contest_name,
+        "description": contest.description,
+        "start_time": _as_utc(contest.start_time).isoformat(),
+        "end_time": _as_utc(contest.end_time).isoformat(),
+        "status": status,
+        "can_submit": status == "active",
+        "problems": visible_problems,
         "server_time": now.isoformat(),
     }
 
@@ -1301,15 +1383,16 @@ def _grade_and_store_submission(
 
 @student_router.get("/problems")
 def list_public_problems(
+    q: str | None = Query(default=None, max_length=100),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
     _require_authenticated_account(session_id, session)
-    problems = session.scalars(
-        select(Problem)
-        .where(Problem.access_modifier == AccessModifier.PUBLIC)
-        .order_by(Problem.problem_id.desc())
-    ).all()
+    stmt = select(Problem).where(Problem.access_modifier == AccessModifier.PUBLIC)
+    stmt = _search_problems(stmt, q)
+    if not q or not q.strip():
+        stmt = stmt.order_by(Problem.problem_id.desc())
+    problems = session.scalars(stmt).all()
     return [
         {
             "problem_id": problem.problem_id,
@@ -1331,6 +1414,8 @@ def list_student_submission_history(
     offset: int = Query(default=0, ge=0),
     problem_id: int | None = Query(default=None, ge=1),
     account_id: int | None = Query(default=None, ge=1),
+    problem_name: str | None = Query(default=None, max_length=100),
+    account_name: str | None = Query(default=None, max_length=100),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
@@ -1340,6 +1425,17 @@ def list_student_submission_history(
         filters.append(Submission.problem_id == problem_id)
     if account_id is not None:
         filters.append(Submission.account_id == account_id)
+    if problem_name and problem_name.strip():
+        filters.append(
+            Problem.problem_name.icontains(problem_name.strip(), autoescape=True)
+        )
+    if account_name and account_name.strip():
+        filters.append(
+            func.coalesce(Account.account_name, "Ẩn danh").icontains(
+                account_name.strip(),
+                autoescape=True,
+            )
+        )
     rows = session.execute(
         select(
             Submission,
@@ -1575,6 +1671,49 @@ def create_problem_for_class(
     return _serialize_problem(problem)
 
 
+@router.get("/academic-classes/{class_id}/available-students")
+def list_available_class_students(
+    class_id: int,
+    search: str = Query(min_length=2, max_length=100),
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_admin_account(session_id, session)
+    _require_class_manager(account, class_id, session)
+    search = search.strip()
+    if len(search) < 2:
+        raise HTTPException(status_code=422, detail="Nhập ít nhất 2 ký tự để tìm thành viên")
+
+    assigned_students = (
+        select(Student.student_id)
+        .join(StudentClass, StudentClass.student_id == Student.student_id)
+        .where(StudentClass.class_id == class_id, Student.account_id == Account.account_id)
+    )
+    candidates = session.scalars(
+        select(Account)
+        .where(
+            Account.is_active.is_(True),
+            Account.role.in_([AccountRole.USER, AccountRole.ADMIN, AccountRole.SUPER_ADMIN]),
+            or_(
+                Account.account_name.ilike(f"%{search}%"),
+                Account.account_email.ilike(f"%{search}%"),
+            ),
+            ~assigned_students.exists(),
+        )
+        .order_by(Account.account_name, Account.account_email)
+        .limit(10)
+    ).all()
+    return [
+        {
+            "account_id": candidate.account_id,
+            "account_name": candidate.account_name,
+            "account_email": candidate.account_email,
+            "role": candidate.role.value,
+        }
+        for candidate in candidates
+    ]
+
+
 @router.post("/academic-classes/{class_id}/students")
 def add_student_to_class(
     class_id: int,
@@ -1586,19 +1725,23 @@ def add_student_to_class(
 
     _require_class_manager(account, class_id, session)
 
-    account = session.get(Account, payload.account_id)
-    if account is None or account.role != AccountRole.USER:
-        raise HTTPException(status_code=404, detail="Không tìm thấy học viên với account_id này")
-    if not account.is_active:
-        raise HTTPException(status_code=409, detail="Tài khoản học viên chưa được kích hoạt")
+    invited_account = session.get(Account, payload.account_id)
+    if invited_account is None or invited_account.role not in {
+        AccountRole.USER,
+        AccountRole.ADMIN,
+        AccountRole.SUPER_ADMIN,
+    }:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản thành viên với account_id này")
+    if not invited_account.is_active:
+        raise HTTPException(status_code=409, detail="Tài khoản thành viên chưa được kích hoạt")
 
     student = session.scalar(
         select(Student)
         .options(selectinload(Student.account))
-        .where(Student.account_id == account.account_id)
+        .where(Student.account_id == invited_account.account_id)
     )
     if student is None:
-        student = Student(account_id=account.account_id)
+        student = Student(account_id=invited_account.account_id)
         session.add(student)
         session.flush()
 
@@ -1609,7 +1752,7 @@ def add_student_to_class(
         )
     )
     if existing is not None:
-        raise HTTPException(status_code=409, detail="Học viên đã thuộc academic class")
+        raise HTTPException(status_code=409, detail="Thành viên đã thuộc academic class")
 
     session.add(StudentClass(class_id=class_id, student_id=student.student_id))
     session.commit()

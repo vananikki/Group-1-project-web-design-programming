@@ -143,7 +143,7 @@ class ProblemCreateIn(JudgeRequest):
     data_constraints: str | None = None
     time_limit: int = Field(ge=1, le=10)
     memory_limit: int = Field(ge=64, le=1024)
-    access_modifier: Literal["private", "public"] = "private"
+    access_modifier: Literal["private", "public", "hidden"] = "private"
     testcases: list[ProblemTestcaseIn] = Field(default_factory=list, max_length=100)
 
     @field_validator("problem_name")
@@ -163,7 +163,7 @@ class ProblemUpdateIn(JudgeRequest):
     data_constraints: str | None = None
     time_limit: int | None = Field(default=None, ge=1, le=10)
     memory_limit: int | None = Field(default=None, ge=64, le=1024)
-    access_modifier: Literal["private", "public"] | None = None
+    access_modifier: Literal["private", "public", "hidden"] | None = None
     testcases: list[ProblemTestcaseIn] | None = Field(default=None, max_length=100)
 
     @field_validator("problem_name")

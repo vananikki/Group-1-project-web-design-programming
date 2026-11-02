@@ -6,7 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from db.session import SESSION_COOKIE_SECURE, SESSION_TTL, get_session
+from db.session import (
+    SESSION_COOKIE_SECURE,
+    SESSION_TTL,
+    cleanup_expired_sessions,
+    get_session,
+)
 from db.tables_phase1 import Account, AccountRole, Base, Session as UserSession
 from src.app import app
 
@@ -107,6 +112,31 @@ def test_login_rejects_invalid_password_without_setting_session_cookie(client):
     assert response.status_code == 401
     assert "set-cookie" not in response.headers
     assert client.get("/auth/me").status_code == 401
+
+
+def test_cleanup_expired_sessions_removes_stale_rows(client):
+    account_id = create_account()
+
+    with TestingSessionLocal() as db:
+        expired = UserSession(
+            session_id="expired-session",
+            account_id=account_id,
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        )
+        valid = UserSession(
+            session_id="valid-session",
+            account_id=account_id,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+        db.add_all([expired, valid])
+        db.commit()
+
+    deleted_count = cleanup_expired_sessions(engine)
+    assert deleted_count == 1
+
+    with TestingSessionLocal() as db:
+        remaining = {row.session_id for row in db.query(UserSession).all()}
+        assert remaining == {"valid-session"}
 
 
 def test_unverified_email_requires_correct_password_and_never_creates_session(client):

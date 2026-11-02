@@ -36,6 +36,7 @@ except ModuleNotFoundError:
 class AccessModifier(str, Enum):
     PRIVATE = "private"
     PUBLIC = "public"
+    HIDDEN = "hidden"
 
 class Judge0Language(str, Enum):
     C = "C"

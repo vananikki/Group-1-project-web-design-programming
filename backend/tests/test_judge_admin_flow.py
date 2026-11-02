@@ -603,7 +603,7 @@ def test_problem_ownership_and_public_practice_are_enforced(monkeypatch):
     public_problem_response = client.post(
         "/admin/judge/problems",
         json={
-            "problem_name": "Public practice problem",
+            "problem_name": "Public practice problem A + B",
             "data_constraints": "1 <= n <= 10^5",
             "time_limit": 1,
             "memory_limit": 256,
@@ -654,6 +654,48 @@ def test_problem_ownership_and_public_practice_are_enforced(monkeypatch):
         public_problem["problem_id"]
     ]
     assert "testcases" not in public_list.json()[0]
+    search_by_title = client.get(
+        "/student/problems?q=practice",
+        cookies=student_cookies,
+    )
+    assert search_by_title.status_code == 200, search_by_title.text
+    assert [item["problem_id"] for item in search_by_title.json()] == [
+        public_problem["problem_id"]
+    ]
+    search_by_punctuation = client.get(
+        "/student/problems?q=A%2BB",
+        cookies=student_cookies,
+    )
+    assert search_by_punctuation.status_code == 200, search_by_punctuation.text
+    assert [item["problem_id"] for item in search_by_punctuation.json()] == [
+        public_problem["problem_id"]
+    ]
+    assert client.get(
+        "/student/problems?q=A%2BZ",
+        cookies=student_cookies,
+    ).json() == []
+    search_by_constraints = client.get(
+        "/student/problems?q=10%5E5",
+        cookies=student_cookies,
+    )
+    assert search_by_constraints.status_code == 200, search_by_constraints.text
+    assert search_by_constraints.json() == []
+    assert client.get(
+        "/student/problems?q=owner-only",
+        cookies=student_cookies,
+    ).json() == []
+    owner_search = client.get(
+        "/admin/judge/problems?q=owner-only",
+        cookies={"session_id": "problem-owner-session"},
+    )
+    assert owner_search.status_code == 200, owner_search.text
+    assert [item["problem_id"] for item in owner_search.json()] == [
+        private_problem["problem_id"]
+    ]
+    assert client.get(
+        f"/student/problems?q={'x' * 101}",
+        cookies=student_cookies,
+    ).status_code == 422
     assert client.post(
         f"/student/problems/{private_problem['problem_id']}/submissions",
         json={"language_id": 72, "source_code": "print('private')"},
@@ -669,6 +711,85 @@ def test_problem_ownership_and_public_practice_are_enforced(monkeypatch):
     assert public_submission.json()["status"] == "Accepted"
     assert public_submission.json()["score"] == 100
     assert "input_data" not in public_submission.json()["testcases"][0]
+
+
+def test_hidden_contest_problem_is_invisible_to_students_until_contest_is_active():
+    owner_id = _create_account("hidden-owner@example.com", AccountRole.ADMIN)
+    student_id = _create_account("hidden-student@example.com", AccountRole.USER)
+    _set_session(owner_id, "hidden-owner-session")
+    _set_session(student_id, "hidden-student-session")
+
+    client = TestClient(app)
+    response = client.post(
+        "/admin/judge/problems",
+        json={
+            "problem_name": "Hidden contest problem",
+            "time_limit": 1,
+            "memory_limit": 256,
+            "access_modifier": "hidden",
+            "testcases": [{"input_data": "7\n", "expected_output": "7\n", "point": 100}],
+        },
+        cookies={"session_id": "hidden-owner-session"},
+    )
+    assert response.status_code == 200, response.text
+    problem_id = response.json()["problem_id"]
+
+    class_response = client.post(
+        "/admin/judge/academic-classes",
+        json={"class_name": "Hidden contest class"},
+        cookies={"session_id": "hidden-owner-session"},
+    )
+    class_id = class_response.json()["class_id"]
+    assert client.post(
+        f"/admin/judge/academic-classes/{class_id}/students",
+        json={"account_id": student_id},
+        cookies={"session_id": "hidden-owner-session"},
+    ).status_code == 200
+
+    attach_to_class_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/problems",
+        json={"problem_id": problem_id, "is_required": False},
+        cookies={"session_id": "hidden-owner-session"},
+    )
+    assert attach_to_class_response.status_code == 200, attach_to_class_response.text
+
+    now = datetime.now(timezone.utc)
+    contest_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/contests/create",
+        json={
+            "contest_name": "Hidden contest",
+            "description": "Contest with hidden problem",
+            "start_time": (now + timedelta(minutes=30)).isoformat(),
+            "end_time": (now + timedelta(minutes=90)).isoformat(),
+            "problem_ids": [problem_id],
+        },
+        cookies={"session_id": "hidden-owner-session"},
+    )
+    assert contest_response.status_code == 200, contest_response.text
+    contest_id = contest_response.json()["contest_id"]
+
+    assert client.get(
+        "/student/problems",
+        cookies={"session_id": "hidden-student-session"},
+    ).json() == []
+    assert client.get(
+        f"/student/problems/{problem_id}",
+        cookies={"session_id": "hidden-student-session"},
+    ).status_code == 404
+
+    contest_detail = client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}",
+        cookies={"session_id": "hidden-student-session"},
+    )
+    assert contest_detail.status_code == 200, contest_detail.text
+    assert contest_detail.json()["problems"] == []
+
+    owner_detail = client.get(
+        f"/admin/judge/problems/{problem_id}",
+        cookies={"session_id": "hidden-owner-session"},
+    )
+    assert owner_detail.status_code == 200, owner_detail.text
+    assert owner_detail.json()["access_modifier"] == "hidden"
 
 
 def test_submission_history_includes_private_and_public_with_each_status(monkeypatch):
@@ -835,6 +956,34 @@ def test_submission_history_includes_private_and_public_with_each_status(monkeyp
     assert len(other_account_history.json()) == 1
     assert other_account_history.json()[0]["account_name"] == "other-history-student"
     assert other_account_history.json()[0]["is_mine"] is False
+    problem_name_history = client.get(
+        "/student/submissions?problem_name=SHARED%20PUBLIC",
+        cookies=student_cookies,
+    )
+    assert problem_name_history.status_code == 200, problem_name_history.text
+    assert len(problem_name_history.json()) == 3
+    assert all(
+        item["problem_name"] == "Shared public history problem"
+        for item in problem_name_history.json()
+    )
+    account_name_history = client.get(
+        "/student/submissions?account_name=OTHER-HISTORY",
+        cookies=student_cookies,
+    )
+    assert account_name_history.status_code == 200, account_name_history.text
+    assert len(account_name_history.json()) == 1
+    assert account_name_history.json()[0]["account_name"] == "other-history-student"
+    named_combined_history = client.get(
+        "/student/submissions?problem_name=history&account_name=other",
+        cookies=student_cookies,
+    )
+    assert named_combined_history.status_code == 200, named_combined_history.text
+    assert len(named_combined_history.json()) == 1
+    assert named_combined_history.json()[0]["problem_id"] == public_problem_id
+    assert client.get(
+        f"/student/submissions?problem_name={'x' * 101}",
+        cookies=student_cookies,
+    ).status_code == 422
     combined_history = client.get(
         f"/student/submissions?problem_id={public_problem_id}&account_id={other_student_id}",
         cookies=student_cookies,
@@ -1132,6 +1281,48 @@ def test_admin_can_manage_class_students_without_schema_changes():
         cookies={"session_id": "class-session"},
     )
     assert remove_response.status_code == 200, remove_response.text
+
+
+def test_admin_can_be_invited_as_student_member_without_management_rights():
+    owner_id = _create_account("owner-member@example.com", AccountRole.ADMIN)
+    other_admin_id = _create_account("member-admin@example.com", AccountRole.ADMIN)
+    _set_session(owner_id, "owner-member-session")
+    _set_session(other_admin_id, "member-admin-session")
+    client = TestClient(app)
+
+    class_response = client.post(
+        "/admin/judge/academic-classes",
+        json={"class_name": "Member admin class"},
+        cookies={"session_id": "owner-member-session"},
+    )
+    assert class_response.status_code == 200, class_response.text
+    class_id = class_response.json()["class_id"]
+
+    invite_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/students",
+        json={"account_id": other_admin_id},
+        cookies={"session_id": "owner-member-session"},
+    )
+    assert invite_response.status_code == 200, invite_response.text
+
+    member_class_list = client.get(
+        "/student/classes",
+        cookies={"session_id": "member-admin-session"},
+    )
+    assert member_class_list.status_code == 200, member_class_list.text
+    assert any(item["class_id"] == class_id for item in member_class_list.json())
+
+    member_detail = client.get(
+        f"/student/classes/{class_id}",
+        cookies={"session_id": "member-admin-session"},
+    )
+    assert member_detail.status_code == 200, member_detail.text
+
+    admin_detail = client.get(
+        f"/admin/judge/academic-classes/{class_id}",
+        cookies={"session_id": "member-admin-session"},
+    )
+    assert admin_detail.status_code == 403, admin_detail.text
 
 
 def test_students_request_class_access_and_owner_approves():
