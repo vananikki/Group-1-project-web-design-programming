@@ -8,6 +8,7 @@ API FastAPI, PostgreSQL và dịch vụ chấm Judge0.
 - [app.md](./app.md): tính năng, giao diện và luồng thao tác người dùng.
 - [database.md](./database.md): bảng, quan hệ, ràng buộc, migration và dữ liệu lưu.
 - [backend.md](./backend.md): API, phân quyền, cấu hình, tích hợp và vận hành backend.
+- [config.md](./config.md): cài đặt project trên máy mới và cấu hình dịch vụ.
 
 ## Chạy local nhanh
 
