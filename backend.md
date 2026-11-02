@@ -1,122 +1,191 @@
-# Backend deployment and public access
+# Backend: API, vận hành và tích hợp
 
-This document explains how to run the FastAPI backend locally, how to expose the frontend publicly with ngrok, and how to avoid CORS issues when the frontend runs on a public domain while the backend remains local.
+Tài liệu này là nguồn tham khảo cho backend FastAPI: cấu trúc, API, phân quyền,
+biến môi trường, migration, tích hợp Judge0/email và cách chạy/kiểm thử. Giao
+diện cùng hành trình người dùng nằm trong [app.md](./app.md); schema và dữ
+liệu lưu trữ nằm trong [database.md](./database.md).
 
-## 1) Run backend locally
+## Kiến trúc và mã nguồn
 
-From the project root:
+- `backend/src/app.py`: tạo FastAPI app, cấu hình CORS và gắn các router.
+- `backend/routers/`: API xác thực/tài khoản và API lớp học, bài tập, contest,
+  lịch sử nộp.
+- `backend/db/schemas.py`: request models, kiểm tra đầu vào và giới hạn dữ liệu.
+- `backend/db/tables_phase1.py`, `tables_phase2.py`: SQLAlchemy models đang
+  hoạt động.
+- `backend/db/session.py`: engine và dependency cấp database session cho API.
+- `backend/db/initialize_tables.py`: tạo các bảng còn thiếu.
+- `backend/db/migrate_judge_admin.py`: migration lặp lại an toàn cho schema
+  judge; hiện cũng xóa vĩnh viễn bảng `solution` đã ngừng sử dụng.
+- `backend/tests/`: kiểm thử API, quyền truy cập, phiên và migration.
+
+Backend dùng FastAPI, SQLAlchemy, PostgreSQL và session cookie. Mã nguồn bài
+nộp được gửi tới Judge0; FastAPI không thực thi mã nguồn trực tiếp. Danh sách
+ngôn ngữ được đồng bộ từ Judge0 vào bảng `language`.
+
+## API
+
+Các endpoint cần đăng nhập nhận cookie `session_id`. Lỗi phổ biến: `401` khi
+chưa đăng nhập/session hết hạn, `403` khi không đủ quyền, `404` khi không tìm
+thấy tài nguyên, `409` khi xung đột dữ liệu, `422` khi request không hợp lệ.
+Chi tiết request/response có thể xem tại OpenAPI `/docs` khi backend đang chạy.
+
+### Xác thực và tài khoản
+
+| Method | Endpoint | Quyền / mục đích |
+|---|---|---|
+| `POST` | `/auth/register` | Tạo tài khoản USER chưa kích hoạt |
+| `POST` | `/auth/send-code`, `/auth/send-otp` | Gửi mã xác thực email |
+| `POST` | `/auth/verify-code`, `/auth/verify-otp` | Xác thực email |
+| `POST` | `/auth/login` | Đăng nhập và tạo cookie/session |
+| `POST` | `/auth/logout` | Xóa session hiện tại và cookie |
+| `GET`, `PATCH` | `/auth/me` | Đọc hồ sơ hiện tại; cập nhật tên |
+| `POST` | `/auth/forgot-password` | Gửi mã đặt lại mật khẩu |
+| `POST` | `/auth/reset-password` | Đặt mật khẩu mới bằng mã xác thực |
+| `GET` | `/admin/accounts` | SUPER_ADMIN: liệt kê tài khoản |
+| `PATCH` | `/admin/accounts/{account_id}/role` | SUPER_ADMIN: đổi vai trò |
+| `DELETE` | `/admin/accounts/{account_id}` | Xóa tài khoản theo quy tắc bảo vệ super admin |
+
+Vai trò là `USER`, `ADMIN`, `SUPER_ADMIN`. Backend luôn xác minh session,
+trạng thái kích hoạt và quyền; ẩn nút trên frontend không phải biện pháp phân
+quyền. Session/cookie có thời hạn một ngày.
+
+### Bài tập và chấm bài
+
+| Method | Endpoint | Quyền / mục đích |
+|---|---|---|
+| `GET` | `/admin/judge/problems?q=...` | ADMIN: danh sách bài được phép quản lý; `q` tìm tên |
+| `GET` | `/admin/judge/problems/{problem_id}` | ADMIN chủ bài hoặc SUPER_ADMIN: xem bài và testcase |
+| `POST` | `/admin/judge/problems` | ADMIN: tạo bài, có thể kèm testcase |
+| `PATCH` | `/admin/judge/problems/{problem_id}` | Chủ bài hoặc SUPER_ADMIN: cập nhật bài/testcase |
+| `DELETE` | `/admin/judge/problems/{problem_id}` | SUPER_ADMIN: xóa bài và dữ liệu phụ thuộc |
+| `GET` | `/student/problems?q=...` | Người dùng đăng nhập: tìm bài public theo tên |
+| `GET` | `/student/problems/{problem_id}` | Người dùng đăng nhập: đọc bài public |
+| `POST` | `/student/problems/{problem_id}/submissions` | Nộp bài public và chấm qua Judge0 |
+| `GET` | `/student/languages` | Lấy ngôn ngữ đã đồng bộ |
+
+Giới hạn/đầu vào bài tập được định nghĩa bởi `ProblemCreateIn`,
+`ProblemUpdateIn`, `ProblemTestcaseIn` trong `backend/db/schemas.py`.
+
+### Lớp học và phân quyền lớp
+
+| Method | Endpoint | Quyền / mục đích |
+|---|---|---|
+| `GET`, `POST` | `/admin/judge/academic-classes` | ADMIN: liệt kê/tạo lớp |
+| `GET` | `/admin/judge/academic-classes/{class_id}` | Quản trị lớp: xem nội dung/roster |
+| `DELETE` | `/admin/judge/academic-classes/{class_id}` | SUPER_ADMIN: xóa lớp và liên kết |
+| `POST` | `/admin/judge/academic-classes/{class_id}/claim` | ADMIN: nhận quản lý lớp chưa có chủ |
+| `GET` | `/admin/judge/academic-classes/{class_id}/join-requests` | Chủ lớp: xem yêu cầu đang chờ |
+| `PATCH` | `/admin/judge/academic-classes/{class_id}/join-requests/{request_id}` | Chủ lớp: duyệt hoặc từ chối |
+| `GET`, `POST` | `/admin/judge/academic-classes/{class_id}/managers` | Chủ lớp: xem/mời quản trị viên |
+| `GET` | `/admin/judge/academic-classes/{class_id}/available-managers?search=...` | Tìm quản trị viên để mời |
+| `DELETE` | `/admin/judge/academic-classes/{class_id}/managers/{account_id}` | Chủ lớp: thu hồi quyền quản lý |
+| `GET` | `/admin/judge/academic-classes/{class_id}/available-students?search=...` | Quản trị lớp: tìm thành viên để mời |
+| `POST`, `DELETE` | `/admin/judge/academic-classes/{class_id}/students[/{account_id}]` | Quản trị lớp: thêm/xóa thành viên |
+| `POST` | `/admin/judge/academic-classes/{class_id}/problems` | Gán bài có sẵn vào lớp |
+| `POST` | `/admin/judge/academic-classes/{class_id}/problems/create` | Tạo bài và gán vào lớp |
+| `GET` | `/student/classes` | Liệt kê lớp đã tham gia |
+| `GET` | `/student/available-classes` | Khám phá lớp và trạng thái yêu cầu |
+| `POST` | `/student/classes/{class_id}/join-requests` | Gửi yêu cầu vào lớp |
+| `GET` | `/student/classes/{class_id}` | Thành viên: xem bài và contest của lớp |
+| `GET` | `/student/classes/{class_id}/submissions` | Lịch sử bài nộp trong lớp |
+| `POST` | `/student/classes/{class_id}/problems/{problem_id}/submissions` | Nộp bài trong lớp |
+
+Quản trị lớp được xác định qua quan hệ `manage_class`; chủ lớp là quản trị
+viên sở hữu lớp. Các endpoint kiểm tra riêng quyền quản trị, chủ lớp và thành
+viên lớp theo từng thao tác.
+
+### Contest và bài nộp
+
+| Method | Endpoint | Quyền / mục đích |
+|---|---|---|
+| `GET`, `POST` | `/admin/judge/contests` | ADMIN: liệt kê/tạo contest |
+| `GET` | `/admin/judge/contests/{contest_id}` | ADMIN: xem contest và bài |
+| `DELETE` | `/admin/judge/contests/{contest_id}` | SUPER_ADMIN: xóa contest/liên kết/bài nộp |
+| `POST` | `/admin/judge/contests/{contest_id}/problems` | Thêm bài vào contest |
+| `POST` | `/admin/judge/academic-classes/{class_id}/contests` | Gán contest có sẵn vào lớp |
+| `POST` | `/admin/judge/academic-classes/{class_id}/contests/create` | Tạo contest và gán bài lớp |
+| `GET` | `/admin/judge/contests/{contest_id}/standings` | Xem bảng xếp hạng |
+| `GET` | `/student/classes/{class_id}/contests/{contest_id}` | Thành viên/quản trị lớp: xem contest |
+| `GET` | `/student/classes/{class_id}/contests/{contest_id}/standings` | Xem xếp hạng contest trong lớp |
+| `GET` | `/admin/judge/submissions` | SUPER_ADMIN: quản lý bài nộp |
+| `DELETE` | `/admin/judge/submissions/{submission_id}` | SUPER_ADMIN: xóa bài nộp |
+| `GET` | `/student/submissions` | Lịch sử toàn server, có lọc và phân trang |
+| `GET` | `/student/submissions/{submission_id}/source` | Chủ bài nộp: xem mã nguồn |
+| `GET` | `/student/classes/{class_id}/contests/{contest_id}/submissions/{submission_id}/source` | Quản trị lớp: xem mã nộp trong contest |
+| `GET` | `/admin/judge/health` | Kiểm tra API |
+
+Lịch sử danh sách không trả mã nguồn. Endpoint xem mã xác minh quyền sở hữu
+hoặc quyền quản lý contest theo phạm vi. Schema và chính sách lưu source/metrics
+được mô tả ở [database.md](./database.md).
+
+## Cấu hình môi trường
+
+Đặt các giá trị trong `backend/.env`; không commit thông tin xác thực.
+
+| Biến | Ý nghĩa |
+|---|---|
+| `DATABASE_URL` | URL PostgreSQL, ví dụ định dạng `postgresql+psycopg://...` |
+| `JUDGE0_URL` | URL Judge0; mặc định `http://localhost:2358` |
+| `SESSION_COOKIE_SECURE` | Đặt `true` khi dùng HTTPS; mặc định `false` |
+| `CORS_ORIGINS` | Danh sách origin frontend, phân tách bằng dấu phẩy |
+| `GOOGLE_CREDENTIALS_PATH` | Đường dẫn OAuth credentials cho Gmail |
+| `GOOGLE_TOKEN_PATH` | Đường dẫn token OAuth; mặc định `backend/token.json` |
+
+Gửi email xác thực/đặt lại mật khẩu cần cấu hình OAuth Gmail. Mã xác thực và
+giới hạn gửi hiện ở bộ nhớ tiến trình: mã hết hạn sau 2 phút, gửi lại cùng
+địa chỉ cách nhau 3 phút, tối đa 5 email/phút. Vì dữ liệu không chia sẻ giữa
+các worker và mất khi restart, chỉ chạy một worker nếu dùng các giới hạn này.
+
+## Chạy local và migration
 
 ```bash
 cd backend
-PYTHONPATH=. .venv/bin/python -m uvicorn src.app:app --host 0.0.0.0 --port 8000
+PYTHONPATH=. .venv/bin/python db/initialize_tables.py
+PYTHONPATH=. .venv/bin/python db/migrate_judge_admin.py
+PYTHONPATH=. .venv/bin/python -m src.serve
 ```
 
-This binds the API on port 8000 and allows access from:
+`initialize_tables.py` tạo bảng còn thiếu nhưng không tự thêm cột vào bảng đã
+tồn tại; migration xử lý các cột cần bổ sung. Migration xóa bảng cũ `solution`
+và mọi dữ liệu trong đó. Chạy trước khi khởi động backend sau khi nâng cấp
+source code.
 
-- localhost
-- LAN IPs
-- Tailscale IPs
-- other local devices on the same network
-
-If you want the API to stay local-only, use `127.0.0.1` instead of `0.0.0.0`.
-
-## 2) Run frontend locally
+Frontend tĩnh:
 
 ```bash
 cd ..
 python3 -m http.server 5500 --bind 0.0.0.0 --directory frontend
 ```
 
-The frontend is then available at:
+API mặc định tại `http://localhost:8000`; OpenAPI tại `/docs`. Từ frontend
+localhost, API helper thử port `8000`, rồi dò các port forwarded `8001–8010`
+nếu cần.
 
-- http://localhost:5500
-- http://<LAN_IP>:5500
-- http://<Tailscale_IP>:5500
+## Triển khai và truy cập mạng
 
-## 3) Expose frontend to the public via ngrok
+Backend mặc định chấp nhận localhost/LAN trong cấu hình CORS; thêm chính xác
+origin frontend vào `CORS_ORIGINS` khi cần. Dùng `127.0.0.1` để chỉ bind
+local; dùng `0.0.0.0` để thiết bị khác trong mạng truy cập được, đồng thời
+cấu hình firewall phù hợp.
 
-Use the static ngrok domain you already have:
+Có thể public frontend qua ngrok mà backend vẫn chạy local:
 
 ```bash
-ngrok http --domain=racoon-synopsis-daintily.ngrok-free.dev 5500
+ngrok http --domain=<your-domain> 5500
 ```
 
-The public frontend URL is:
+Trình duyệt của người dùng vẫn cần truy cập được backend trên máy chủ. CORS
+không làm backend local tự khả dụng từ Internet; không public API nếu chưa
+có cấu hình bảo vệ phù hợp. Hướng dẫn UI và luồng thao tác ở [app.md](./app.md).
 
-```text
-https://racoon-synopsis-daintily.ngrok-free.dev
+## Kiểm thử
+
+Từ thư mục `backend`:
+
+```bash
+.venv/bin/pytest
 ```
 
-In this setup, the backend stays local; ngrok only exposes the frontend. That keeps the app simpler and avoids exposing the backend directly.
-
-## 4) CORS configuration
-
-The backend must allow the public frontend origin. In the backend environment or `.env`, set:
-
-```env
-CORS_ORIGINS=https://racoon-synopsis-daintily.ngrok-free.dev
-```
-
-The app also allows `.ngrok-free.app` / `.ngrok.io` origins through the regex in the CORS middleware.
-
-## 5) Fix the frontend API URL
-
-The frontend chooses its backend URL from the current page hostname. When the page is served from ngrok, it must not try to call the same public host on port 8000. Instead, it should call the local backend.
-
-Use one of these patterns:
-
-```js
-sessionStorage.setItem("online-judge-api-base-url", "http://127.0.0.1:8000");
-location.reload();
-```
-
-Or for LAN/Tailscale:
-
-```js
-sessionStorage.setItem("online-judge-api-base-url", "http://192.168.1.50:8000");
-location.reload();
-```
-
-This is the correct behavior for a public frontend with a local backend.
-
-## 6) Recommended architecture
-
-This project is best run in the following pattern:
-
-```text
-Browser -> ngrok public frontend -> local frontend server -> local backend API
-```
-
-This setup works well for:
-
-- localhost access
-- LAN access from other devices
-- Tailscale access
-- public access through ngrok
-
-## 7) Troubleshooting
-
-### Frontend opens but API calls fail
-
-Check that:
-
-- backend is running on port 8000
-- frontend is running on port 5500
-- the browser is not trying to call `https://<ngrok-domain>:8000`
-- CORS is allowed for the ngrok frontend domain
-
-### Browser blocks requests with CORS
-
-Verify that the backend includes the origin in `CORS_ORIGINS` and that the request origin matches exactly. For example:
-
-```text
-https://racoon-synopsis-daintily.ngrok-free.dev
-```
-
-### Local backend is unreachable from LAN
-
-If another device on the LAN cannot reach the backend, run it on `0.0.0.0:8000` and make sure the firewall/network allows traffic on port 8000.
-
-### Public access still fails
-
-Open the URL in the browser and inspect the console/network tab. The usual problem is the frontend constructing the wrong API base URL.
+Các kiểm thử chính bao gồm API quản trị/lớp học, đăng nhập/session, xóa tài
+khoản và migration schema.

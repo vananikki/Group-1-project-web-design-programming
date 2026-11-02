@@ -11,6 +11,8 @@ def migrate_judge_schema(database_engine: Engine) -> None:
     Base.metadata.create_all(bind=database_engine)
 
     with database_engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS solution"))
+
         problem_columns = {
             column["name"]
             for column in inspect(connection).get_columns("problem")

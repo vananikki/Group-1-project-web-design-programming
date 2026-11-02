@@ -146,6 +146,10 @@ h2 {
     align-items: start;
 }
 
+.class-detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .sidebar-panel {
     position: sticky;
     top: 20px;
@@ -2075,6 +2079,68 @@ h2 {
     border-top: 1px solid var(--border);
 }
 
+.class-tabs {
+    display: flex;
+    gap: 8px;
+    margin: 0;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+}
+
+.class-tab {
+    position: relative;
+    flex: 0 0 auto;
+    min-height: 46px;
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 10px 10px 0 0;
+    color: #64748b;
+    background: transparent;
+    box-shadow: none;
+    font-weight: 700;
+}
+
+.class-tab:hover:not(:disabled) {
+    color: var(--blue-dark);
+    background: #f3f6ff;
+    box-shadow: none;
+    transform: none;
+}
+
+.class-tab.active,
+.class-tab[aria-selected="true"] {
+    color: var(--blue-dark);
+    background: #f3f6ff;
+}
+
+.class-tab.active::after,
+.class-tab[aria-selected="true"]::after {
+    position: absolute;
+    right: 12px;
+    bottom: -1px;
+    left: 12px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background: var(--blue);
+    content: "";
+}
+
+.class-tab-panel {
+    display: grid;
+    align-content: start;
+    gap: 16px;
+    padding-top: 20px;
+}
+
+.class-tab-panel[hidden] {
+    display: none !important;
+}
+
+.class-tab-panel .member-sidebar {
+    position: static;
+    max-height: none;
+}
+
 .workspace-heading {
     align-items: flex-end;
     margin-bottom: 20px;
@@ -2283,19 +2349,10 @@ h2 {
     font-size: 0.78rem;
 }
 
-.classroom-tools {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
-    gap: 14px;
-    margin-bottom: 18px;
-}
-
-.classroom-tools .panel-block,
 .classroom-content {
     background: #fbfcff;
 }
 
-.classroom-tools h3,
 .classroom-content h3 {
     margin: 0 0 8px;
     color: #24365f;

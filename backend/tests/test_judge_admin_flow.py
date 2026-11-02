@@ -28,7 +28,6 @@ from db.tables_phase2 import (
     ContestProblem,
     Language,
     Problem,
-    Solution,
     Submission,
     Testcase as JudgeTestcase,
 )
@@ -176,11 +175,6 @@ def test_super_admin_can_delete_anonymous_problem_and_all_related_data():
                     input_data="1",
                     expected_output="1",
                 ),
-                Solution(
-                    problem_id=problem.problem_id,
-                    language_id=language.language_id,
-                    content="print(1)",
-                ),
                 AcademicClassProblem(
                     class_id=academic_class.class_id,
                     problem_id=problem.problem_id,
@@ -219,7 +213,6 @@ def test_super_admin_can_delete_anonymous_problem_and_all_related_data():
     with TestingSessionLocal() as db:
         assert db.get(Problem, problem_id) is None
         assert db.query(JudgeTestcase).filter_by(problem_id=problem_id).count() == 0
-        assert db.query(Solution).filter_by(problem_id=problem_id).count() == 0
         assert db.query(AcademicClassProblem).filter_by(problem_id=problem_id).count() == 0
         assert db.query(ContestProblem).filter_by(problem_id=problem_id).count() == 0
         assert db.query(Submission).filter_by(problem_id=problem_id).count() == 0

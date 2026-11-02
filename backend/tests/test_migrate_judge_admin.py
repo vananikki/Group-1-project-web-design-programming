@@ -120,3 +120,22 @@ def test_migration_adds_data_constraints_to_existing_problem_table():
         column["name"] for column in inspect(engine).get_columns("problem")
     }
     assert "data_constraints" in problem_columns
+
+
+def test_migration_drops_legacy_solution_table():
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE solution ("
+                "solution_id INTEGER PRIMARY KEY, content TEXT NOT NULL)"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO solution (solution_id, content) VALUES (1, 'legacy')")
+        )
+
+    migrate_judge_schema(engine)
+    migrate_judge_schema(engine)
+
+    assert not inspect(engine).has_table("solution")

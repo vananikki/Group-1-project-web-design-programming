@@ -78,12 +78,6 @@ class Language(Base):
         unique=True,
     )
 
-    solutions: Mapped[list["Solution"]] = relationship(
-        "Solution",
-        back_populates="language",
-        cascade="all, delete-orphan",
-    )
-
     submissions: Mapped[list["Submission"]] = relationship(
         "Submission",
         back_populates="language",
@@ -94,42 +88,8 @@ class Language(Base):
 
 
 # =========================================================
-# PROBLEM
+# TESTCASE
 # =========================================================
-
-class Solution(Base): 
-    __tablename__ = "solution"
-
-    solution_id: Mapped[int] = mapped_column(
-        Integer,
-        primary_key=True,
-    )
-
-    problem_id: Mapped[int] = mapped_column(
-        ForeignKey("problem.problem_id"),
-        nullable=False,
-    )
-
-    language_id: Mapped[int] = mapped_column(
-        ForeignKey("language.language_id"),
-        nullable=False,
-    )
-
-    content: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-    )
-
-    problem: Mapped["Problem"] = relationship(
-        "Problem",
-        back_populates="solutions",
-    )
-
-    language: Mapped["Language"] = relationship(
-        "Language",
-        back_populates="solutions",
-    )
-
 class Testcase(Base): 
     __tablename__ = "testcase"
 
@@ -255,12 +215,6 @@ class Problem(Base):
 
     class_problems: Mapped[list["AcademicClassProblem"]] = relationship(
         "AcademicClassProblem",
-        back_populates="problem",
-        cascade="all, delete-orphan",
-    )
-
-    solutions: Mapped[list["Solution"]] = relationship(
-        "Solution",
         back_populates="problem",
         cascade="all, delete-orphan",
     )

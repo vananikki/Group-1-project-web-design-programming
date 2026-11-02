@@ -6,7 +6,6 @@ const pageMessage = document.getElementById("page-message");
 const adminHome = document.getElementById("admin-home");
 const studentHome = document.getElementById("student-home");
 const workspace = document.getElementById("class-workspace");
-const adminTools = document.getElementById("admin-class-tools");
 const createClassForm = document.getElementById("create-class-form");
 const showCreateClassButton = document.getElementById("show-create-class");
 const cancelCreateClassButton = document.getElementById("cancel-create-class");
@@ -144,28 +143,59 @@ function renderCards(element, items, options = {}) {
     element.innerHTML = items.map((item) => classCard(item, options)).join("");
 }
 
-function bindSidebarNavigation() {
-    document.querySelectorAll(".nav-item").forEach((navItem) => {
-        navItem.addEventListener("click", (event) => {
-            const targetId = navItem.getAttribute("href");
-            if (!targetId?.startsWith("#") || targetId === "#") {
-                document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
-                navItem.classList.add("active");
-                return;
-            }
+function activateClassTab(name, focus = false) {
+    const tabs = [...document.querySelectorAll("#class-tabs [role='tab']")];
+    const availableTabs = tabs.filter((tab) => !tab.hidden);
+    const activeTab = availableTabs.find((tab) => tab.dataset.classTab === name) || availableTabs[0];
+    if (!activeTab) {
+        return;
+    }
 
-            const target = document.getElementById(targetId.slice(1));
-            if (!target) {
-                return;
-            }
-
-            event.preventDefault();
-            document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item === navItem));
-            target.scrollIntoView({ behavior: "smooth", block: "start" });
-            history.replaceState(null, "", targetId);
-        });
+    tabs.forEach((tab) => {
+        const isActive = tab === activeTab;
+        tab.classList.toggle("active", isActive);
+        tab.setAttribute("aria-selected", String(isActive));
+        tab.tabIndex = isActive ? 0 : -1;
     });
+
+    document.querySelectorAll("[data-class-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.classPanel !== activeTab.dataset.classTab;
+    });
+    if (focus) {
+        activeTab.focus();
+    }
 }
+
+document.getElementById("class-tabs").addEventListener("click", (event) => {
+    const tab = event.target.closest("[role='tab']");
+    if (tab && !tab.hidden) {
+        activateClassTab(tab.dataset.classTab);
+    }
+});
+
+document.getElementById("class-tabs").addEventListener("keydown", (event) => {
+    const tabs = [...document.querySelectorAll("#class-tabs [role='tab']:not([hidden])")];
+    const currentIndex = tabs.indexOf(event.target);
+    if (currentIndex < 0) {
+        return;
+    }
+
+    let nextIndex;
+    if (event.key === "ArrowRight") {
+        nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === "ArrowLeft") {
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (event.key === "Home") {
+        nextIndex = 0;
+    } else if (event.key === "End") {
+        nextIndex = tabs.length - 1;
+    } else {
+        return;
+    }
+
+    event.preventDefault();
+    activateClassTab(tabs[nextIndex].dataset.classTab, true);
+});
 
 async function loadAdminClasses() {
     const classes = await requestJson("/admin/judge/academic-classes");
@@ -198,14 +228,6 @@ function showHome() {
     }
     if (studentHome) {
         studentHome.hidden = currentAccount.role !== "USER";
-    }
-    const sidebar = document.querySelector(".sidebar-panel");
-    if (sidebar) {
-        sidebar.hidden = true;
-    }
-    const classToolsNav = document.getElementById("class-tools-nav");
-    if (classToolsNav) {
-        classToolsNav.hidden = true;
     }
     window.location.href = "classroom_list.html?view=my-classes";
 }
@@ -252,8 +274,6 @@ async function openClass(classId, isStudent) {
         studentHome.hidden = true;
     }
     workspace.hidden = false;
-    document.querySelector(".sidebar-panel").hidden = false;
-    document.getElementById("class-tools-nav").hidden = false;
     document.getElementById("workspace-title").textContent = data.class_name;
     document.getElementById("workspace-meta").textContent =
         `Lớp #${data.class_id} · ${(data.problems || []).length} bài tập · ${(data.contests || []).length} cuộc thi`;
@@ -266,9 +286,16 @@ async function openClass(classId, isStudent) {
         currentAccount.role === "SUPER_ADMIN" || data.is_owner
     );
     const canReviewJoinRequests = canManage && data.is_owner;
-    adminTools.hidden = !canManage;
+    document.querySelectorAll(".admin-class-tools").forEach((tool) => {
+        tool.hidden = !canManage;
+    });
+    document.getElementById("create-contest-tools").hidden = !canReviewJoinRequests;
     document.getElementById("join-request-tools").hidden = !canReviewJoinRequests;
     document.getElementById("manager-tools").hidden = !canManagePermissions;
+    document.getElementById("class-tab-history").hidden = canManage;
+    activateClassTab(
+        document.querySelector("#class-tabs [aria-selected='true']")?.dataset.classTab || "problems",
+    );
     const members = data.students || [];
     const isCurrentAccountMember = members.some(
         (member) => member.account_id === currentAccount.account_id,
@@ -290,7 +317,6 @@ async function openClass(classId, isStudent) {
         const isOwner = ownerId !== null && member.account_id === ownerId;
         return !isOwner && (member.account_role || "USER") === "USER";
     });
-    document.getElementById("class-members-panel").hidden = false;
     document.getElementById("member-count-badge").textContent = String(studentMembers.length);
     document.getElementById("member-list").innerHTML = members.map((member) => {
         const isOwner = ownerId !== null && member.account_id === ownerId;
@@ -371,7 +397,6 @@ async function openClass(classId, isStudent) {
         await loadManagers(activeClassId, canManagePermissions);
         await loadAvailableMembers(activeClassId, canManagePermissions);
     } else {
-        document.getElementById("submission-history").hidden = false;
         await loadSubmissionHistory(activeClassId);
     }
 }
@@ -545,7 +570,6 @@ async function loadSubmissionHistory(classId, { append = false } = {}) {
 }
 
 async function initialize() {
-    bindSidebarNavigation();
     const params = new URLSearchParams(window.location.search);
     const classId = params.get("class_id");
     if (!classId || !/^\d+$/.test(classId)) {
@@ -565,8 +589,6 @@ async function initialize() {
         classListView = currentAccount.role !== "USER" && requestedListView !== "my-classes"
             ? "managed-classes"
             : "my-classes";
-        document.getElementById("back-to-class-list").href =
-            `classroom_list.html?view=${classListView}`;
         const isStudent = currentAccount.role === "USER";
         const openAsStudent = isStudent || classListView === "my-classes";
         if (openAsStudent) {

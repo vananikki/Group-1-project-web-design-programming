@@ -5,7 +5,7 @@ chính thức là `backend/db/tables_phase1.py` và `backend/db/tables_phase2.py
 Backend kết nối cơ sở dữ liệu qua `DATABASE_URL` trong `backend/.env`; không
 đưa URL hoặc thông tin xác thực vào tài liệu này.
 
-> Khi thay đổi model, chạy các lệnh khởi tạo/migration trong README trước khi
+> Khi thay đổi model, chạy các lệnh khởi tạo/migration trong [README.md](./README.md) trước khi
 > khởi động backend. Đặc biệt, `initialize_tables.py` tạo bảng còn thiếu nhưng
 > không tự thêm cột mới vào bảng đã tồn tại; `migrate_judge_admin.py` xử lý
 > các thay đổi bổ sung như testcase metadata, dữ liệu nguồn Base64, metrics
@@ -31,8 +31,6 @@ erDiagram
     ACADEMIC_CLASS ||--o{ CLASS_JOIN_REQUEST : "receives"
 
     PROBLEM ||--o{ TESTCASE : "is judged with"
-    PROBLEM ||--o{ SOLUTION : "has reference solutions"
-    LANGUAGE ||--o{ SOLUTION : "uses"
     PROBLEM ||--o{ SUBMISSION : "receives"
     LANGUAGE ||--o{ SUBMISSION : "used for"
     CONTEST o|--o{ SUBMISSION : "may contain"
@@ -109,12 +107,6 @@ erDiagram
         int point
         text input_data
         text expected_output
-    }
-    SOLUTION {
-        int solution_id PK
-        int problem_id FK
-        int language_id FK
-        text content
     }
     LANGUAGE {
         int language_id PK
@@ -194,7 +186,7 @@ profiles. Authentication sessions belong to one account.
 | `academic_class` | `class_id` integer PK; `class_name` varchar(300) required. |
 | `manage_class` | `manage_id` integer PK; `class_id` required FK → `academic_class.class_id`; `admin_id` required FK → `admin.admin_id`; unique (`class_id`, `admin_id`). |
 | `student_class` | `student_class_id` integer PK; `class_id` required FK → `academic_class.class_id`; `student_id` required FK → `student.student_id`; unique (`class_id`, `student_id`). |
-| `class_join_request` | `join_request_id` integer PK; `class_id` required FK → `academic_class.class_id` with `ON DELETE CASCADE`; `student_id` required FK → `student.student_id` with `ON DELETE CASCADE`; `status` varchar(20) required, default `pending` (application states: `pending`, `accepted`, `rejected`); `requested_at` timezone-aware timestamp required, default current time; unique (`class_id`, `student_id`). |
+| `class_join_request` | `join_request_id` integer PK; `class_id` required FK → `academic_class.class_id` with `ON DELETE CASCADE`; `student_id` required FK → `student.student_id` with `ON DELETE CASCADE`; `status` varchar(20) required, default `pending` (application states: `pending`, `approved`, `rejected`); `requested_at` timezone-aware timestamp required, default current time; unique (`class_id`, `student_id`). |
 
 `manage_class` and `student_class` are join tables: admins and students can each
 be associated with multiple classes. `class_join_request` tracks a student's
@@ -204,9 +196,8 @@ request separately from an accepted `student_class` membership.
 
 | Table | Columns and constraints |
 |---|---|
-| `problem` | `problem_id` integer PK; `problem_name` varchar(255) required; `description`, `input_description`, `output_description`, `data_constraints` nullable text; `time_limit` integer required, check `0 < time_limit <= 10` (seconds); `memory_limit` integer required, check `0 < memory_limit <= 1024` (MB); `created_by` nullable integer FK → `account.account_id`; `created_at` timezone-aware timestamp required, default current time; `access_modifier` enum `access_modifier_enum` required (`private`, `public`), default `private`. |
+| `problem` | `problem_id` integer PK; `problem_name` varchar(255) required; `description`, `input_description`, `output_description`, `data_constraints` nullable text; `time_limit` integer required, check `0 < time_limit <= 10` (seconds); `memory_limit` integer required, check `0 < memory_limit <= 1024` (MB); `created_by` nullable integer FK → `account.account_id`; `created_at` timezone-aware timestamp required, default current time; `access_modifier` enum `access_modifier_enum` required (`private`, `public`, `hidden`), default `private`. |
 | `testcase` | `testcase_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `point` integer required; `input_data` and `expected_output` required text. |
-| `solution` | `solution_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `language_id` integer required FK → `language.language_id`; `content` required text. Stores reference solutions, not user submissions. |
 | `language` | `language_id` integer PK (ID synced from Judge0); `name` varchar(50) required, unique. |
 | `submission` | `submission_id` integer PK; `problem_id` integer required FK → `problem.problem_id`; `account_id` nullable integer FK → `account.account_id`; `contest_id` nullable integer FK → `contest.contest_id` with `ON DELETE SET NULL`; `class_id` nullable integer FK → `academic_class.class_id` with `ON DELETE SET NULL`; `language_id` integer required FK → `language.language_id`; `submitted_at` timezone-aware timestamp required, default current time; `status` varchar(50) required; `source_code` nullable text containing Base64-encoded source; `source_code_encoded` boolean required, default `true`; `score`, `passed_testcases`, `total_testcases`, `runtime_ms`, and `memory_kb` nullable integers. |
 
@@ -253,8 +244,8 @@ copying its statement or test cases.
 - `admin` many — many `academic_class` through `manage_class`.
 - `student` many — many `academic_class` through `student_class`; join requests
   are stored in `class_join_request`.
-- `problem` 1 — many `testcase`, `solution`, and `submission`.
-- `language` 1 — many `solution` and `submission`.
+- `problem` 1 — many `testcase` and `submission`.
+- `language` 1 — many `submission`.
 - `contest` many — many `problem` through `contest_problem`.
 - `academic_class` many — many `problem` through `academic_class_problem`.
 - `academic_class` many — many `contest` through `academic_class_contest`.
@@ -272,12 +263,14 @@ copying its statement or test cases.
 - Source code for new submissions is stored as Base64 text; this does not
   encrypt the code. The judge migration performs the one-time conversion of
   older plain-text rows and preserves their encoding state.
+- The repeatable judge migration drops the deprecated `solution` table. This is
+  destructive; any existing rows in that table are permanently removed.
 - Administrative deletion routes explicitly remove dependent test cases,
-  solutions, submissions, and class/contest links as appropriate.
+  submissions, and class/contest links as appropriate.
 - Run `PYTHONPATH=. .venv/bin/python db/initialize_tables.py` for missing
   tables, then `PYTHONPATH=. .venv/bin/python db/migrate_judge_admin.py` to
-  apply incremental judge schema changes. The migration is intended to be
-  repeatable.
+  apply incremental judge schema changes and remove the deprecated `solution`
+  table. The migration is intended to be repeatable.
 - `backend/db/initialize/creating.py` contains older duplicate `Problem` and
   `Contest` declarations. The active application metadata is assembled from
   `tables_phase1.py` and `tables_phase2.py`; use those files when changing the

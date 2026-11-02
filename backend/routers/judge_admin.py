@@ -46,7 +46,6 @@ from db.tables_phase2 import (
     ContestProblem,
     Language,
     Problem,
-    Solution,
     Submission,
     Testcase,
     add_problem_to_contest,
@@ -550,9 +549,6 @@ def delete_problem(
     )
     session.execute(
         delete(ContestProblem).where(ContestProblem.problem_id == problem_id)
-    )
-    session.execute(
-        delete(Solution).where(Solution.problem_id == problem_id)
     )
     session.delete(problem)
     session.commit()

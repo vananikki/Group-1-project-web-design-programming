@@ -1,11 +1,9 @@
-# Luồng giao diện
+# Tính năng, giao diện và luồng người dùng
 
-Tài liệu này mô tả các trang HTML, điều hướng chính và cách các luồng người
-dùng phối hợp với API. Frontend là HTML/CSS/JavaScript tĩnh; xác thực dựa trên
-session cookie do backend FastAPI quản lý. Tổng quan dự án và hướng dẫn chạy
-ứng dụng nằm trong [README.md](./README.md), hướng dẫn backend/public access
-nằm trong [backend.md](./backend.md), schema và cách lưu dữ liệu nằm trong
-[database.md](./database.md).
+Tài liệu này tập trung vào tính năng người dùng nhìn thấy, cấu trúc giao diện
+và luồng thao tác trên frontend HTML/CSS/JavaScript. API và vận hành backend
+được mô tả trong [backend.md](./backend.md); schema/lưu trữ nằm trong
+[database.md](./database.md); cách khởi chạy nhanh ở [README.md](./README.md).
 
 ## Các trang chính
 
@@ -26,6 +24,43 @@ nằm trong [backend.md](./backend.md), schema và cách lưu dữ liệu nằm 
 Mọi trang cần đăng nhập sẽ chuyển người dùng chưa xác thực về trang đăng nhập.
 Các thao tác quản trị được hiển thị theo vai trò và vẫn được backend kiểm tra
 quyền; ẩn thành phần frontend không thay thế kiểm tra phân quyền phía server.
+
+## Tính năng theo vai trò
+
+- **USER:** đăng ký, xác thực email, đăng nhập/đặt lại mật khẩu, luyện bài
+  public, xin vào lớp, làm bài được giao và xem lịch sử.
+- **ADMIN:** tạo/quản lý bài, lớp và contest; quản lý nội dung lớp mình được
+  phân quyền; mời thành viên hoặc quản trị viên theo quyền chủ lớp.
+- **SUPER_ADMIN:** có quyền quản trị toàn cục, quản lý tài khoản và thực hiện
+  các thao tác xóa được giới hạn cho vai trò này.
+- **Chấm bài:** gửi mã nguồn tới Judge0 và nhận verdict, điểm, tiến độ testcase,
+  runtime/bộ nhớ; mã nguồn chỉ hiện theo quyền truy cập lịch sử.
+
+Các màn hình quản trị có thể ẩn nút theo vai trò để giao diện gọn hơn; mọi
+quyền vẫn được xác minh ở API.
+
+## Bố cục giao diện
+
+- Các trang dùng thanh điều hướng trên cùng thống nhất cho tài khoản, lớp học,
+  kho bài tập, lịch sử và đăng xuất.
+- Trang quản trị chi tiết lớp chia nội dung thành tab **Bài tập**,
+  **Cuộc thi**, **Thành viên**. Học viên có thêm tab **Lịch sử nộp**. Tab
+  hỗ trợ bàn phím trái/phải, Home và End.
+- Trang nộp bài và trang lịch sử dùng bố cục nhiều cột ở màn hình rộng, tự xếp
+  dọc trên màn hình nhỏ.
+- Các form phản hồi trạng thái/lỗi ngay tại khu vực thao tác; danh sách rỗng
+  có thông báo hướng dẫn.
+
+## Tài khoản và xác thực
+
+```text
+Đăng ký -> gửi mã email -> xác thực -> đăng nhập -> dashboard
+                                   └-> quên mật khẩu -> mã email -> đặt lại
+```
+
+Sau đăng nhập, session cookie được backend kiểm tra trên các trang cần bảo vệ.
+Người dùng có thể xem/cập nhật tên hiển thị và đăng xuất; SUPER_ADMIN mở khu
+vực quản lý tài khoản để thay đổi vai trò hoặc xóa tài khoản theo quy tắc bảo vệ.
 
 ## Luyện tập bài public
 
@@ -95,13 +130,16 @@ người dùng, và endpoint lấy mã nguồn cũng xác minh quyền sở hữ
 ## Dashboard và lớp học
 
 - Dashboard có feed bài nộp toàn server dạng phân trang.
-- Trang lớp hiển thị bài tập/contest theo lớp đang chọn và một feed lịch sử chỉ
-  gồm các bài nộp được ghi nhận trong lớp đó. API yêu cầu người dùng là thành
-  viên lớp; mã nguồn chỉ người nộp xem được.
+- Học viên khám phá lớp, gửi yêu cầu tham gia, chờ chủ lớp duyệt rồi mở nội dung.
+- Trang chi tiết lớp chia bài tập, cuộc thi và thành viên thành các tab riêng.
+  Học viên có tab lịch sử nộp trong lớp; admin có công cụ gán bài, tạo contest,
+  duyệt yêu cầu và mời thành viên/quản trị viên theo quyền được cấp.
+- API yêu cầu người dùng là thành viên lớp để xem nội dung học viên; mã nguồn
+  chỉ người nộp xem được, ngoại trừ quyền quản trị contest theo chính sách API.
 - Lượt nộp public từ kho bài tập không gắn với lớp. Các lượt cũ không có thông
   tin lớp đáng tin cậy sẽ không được gán vào feed lớp một cách suy đoán.
-- Admin lớp quản lý thành viên, yêu cầu tham gia, bài được giao và contest theo
-  quyền của lớp.
+- Học viên chỉ nộp bài vào contest trong thời gian mở; trang contest có đề bài,
+  vùng nộp bài, bảng xếp hạng và lịch sử contest.
 
 ## Điều hướng liên quan
 
