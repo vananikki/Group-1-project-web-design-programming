@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js?v=20261029a";
+import { apiFetch, readResponse, requireAccountAccess } from "./api.js?v=20261029a";
 import { typesetMath } from "./latex.js?v=20261101b";
 
 const form = document.getElementById("problem-form");
@@ -260,14 +260,11 @@ async function loadProblemForEdit() {
 
 async function initialize() {
     try {
-        const accountResponse = await apiFetch("/auth/me");
-        if (!accountResponse.ok) {
-            window.location.replace("login.html");
-            return;
-        }
-        const account = await accountResponse.json();
-        if (account.role !== "ADMIN" && account.role !== "SUPER_ADMIN") {
-            window.location.replace("problems.html");
+        const account = await requireAccountAccess({
+            allowedRoles: ["ADMIN", "SUPER_ADMIN"],
+            redirectTo: "problems.html",
+        });
+        if (!account) {
             return;
         }
         if (problemId) {
@@ -348,7 +345,9 @@ testcaseList.addEventListener("click", (event) => {
 });
 
 accessPicker.addEventListener("change", () => {
-    if (accessPicker.value === "private") {
+    if (accessPicker.value === "hidden") {
+        setMessage(message, "Bài hidden chỉ hiển thị cho người tạo trước khi contest bắt đầu; khi contest diễn ra sẽ chỉ hiện trong lớp/contest được gắn.");
+    } else if (accessPicker.value === "private") {
         setMessage(message, "Bài private sẽ chỉ hiển thị trong lớp sau khi bạn thêm bài vào lớp.");
     } else {
         setMessage(message, "");
@@ -408,17 +407,20 @@ form.addEventListener("submit", async (event) => {
 form.addEventListener("input", schedulePreview);
 form.addEventListener("change", schedulePreview);
 
-document.getElementById("logout-button").addEventListener("click", async () => {
-    try {
-        const response = await apiFetch("/auth/logout", { method: "POST" });
-        if (response.ok) {
-            window.location.replace("login.html");
-        } else {
+const logoutButton = document.getElementById("logout-button");
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        try {
+            const response = await apiFetch("/auth/logout", { method: "POST" });
+            if (response.ok) {
+                window.location.replace("login.html");
+                return;
+            }
             throw new Error(`Không thể đăng xuất (${response.status}).`);
+        } catch (error) {
+            setMessage(pageMessage, error.message || "Không thể kết nối đến server.", true);
         }
-    } catch (error) {
-        setMessage(pageMessage, error.message || "Không thể kết nối đến server.", true);
-    }
-});
+    });
+}
 
 initialize();

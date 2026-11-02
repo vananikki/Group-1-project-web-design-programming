@@ -71,7 +71,11 @@ async function loadAccount() {
         document.getElementById("account-code").textContent =
             currentAccount.account_code;
         document.getElementById("account-role").textContent =
-            currentAccount.role;
+            ({
+                USER: "Người dùng",
+                ADMIN: "Quản trị viên",
+                SUPER_ADMIN: "Quản trị cấp cao",
+            }[currentAccount.role] ?? currentAccount.role);
 
         const createdAt = new Date(currentAccount.created_at);
         const createdAtElement = document.getElementById("account-created-at");
@@ -150,25 +154,27 @@ saveNameButton.addEventListener("click", async () => {
     }
 });
 
-logoutButton.addEventListener("click", async () => {
-    logoutError.textContent = "";
-    logoutButton.disabled = true;
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        logoutError.textContent = "";
+        logoutButton.disabled = true;
 
-    try {
-        const response = await apiFetch("/auth/logout", { method: "POST" });
-        if (!response.ok) {
-            logoutError.textContent = `Không thể đăng xuất (${response.status})`;
+        try {
+            const response = await apiFetch("/auth/logout", { method: "POST" });
+            if (!response.ok) {
+                logoutError.textContent = `Không thể đăng xuất (${response.status})`;
+                logoutButton.disabled = false;
+                return;
+            }
+
+            window.location.replace("login.html");
+        } catch (error) {
+            console.error(error);
+            logoutError.textContent =
+                error instanceof Error ? error.message : "Không thể kết nối đến server";
             logoutButton.disabled = false;
-            return;
         }
-
-        window.location.replace("login.html");
-    } catch (error) {
-        console.error(error);
-        logoutError.textContent =
-            error instanceof Error ? error.message : "Không thể kết nối đến server";
-        logoutButton.disabled = false;
-    }
-});
+    });
+}
 
 loadAccount();

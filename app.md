@@ -3,8 +3,9 @@
 Tài liệu này mô tả các trang HTML, điều hướng chính và cách các luồng người
 dùng phối hợp với API. Frontend là HTML/CSS/JavaScript tĩnh; xác thực dựa trên
 session cookie do backend FastAPI quản lý. Tổng quan dự án và hướng dẫn chạy
-ứng dụng nằm trong [README.md](./README.md); schema và cách lưu dữ liệu nằm
-trong [database.md](./database.md).
+ứng dụng nằm trong [README.md](./README.md), hướng dẫn backend/public access
+nằm trong [backend.md](./backend.md), schema và cách lưu dữ liệu nằm trong
+[database.md](./database.md).
 
 ## Các trang chính
 
@@ -30,7 +31,7 @@ quyền; ẩn thành phần frontend không thay thế kiểm tra phân quyền 
 
 ```text
 Kho bài tập
-  ├─ lọc theo tên hoặc problem_id
+  ├─ tìm theo tên bài
   └─ chọn tên bài
        └─ problem_submit.html?problem_id=<id>&source=public
             ├─ đề bài ở nửa trái
@@ -39,9 +40,12 @@ Kho bài tập
                  └─ submissions.html?problem_id=<id>
 ```
 
-Trang kho bài tập giữ danh sách gọn, có ô lọc. Trang làm bài chia ngang thành
-hai cột trên màn hình rộng: đề bên trái và form nộp bên phải. Trên màn hình
-hẹp, hai cột xếp thành một cột.
+Trang kho bài tập giữ danh sách gọn, có ô tìm kiếm nhỏ ở góc trên của danh
+sách. Khi nhập, frontend debounce request tới API; backend lọc trực tiếp trong
+cơ sở dữ liệu theo tên bài, không tìm trong mô tả hay nội dung đề.
+
+Trang làm bài chia ngang thành hai cột trên màn hình rộng: đề bên trái và form
+nộp bên phải. Trên màn hình hẹp, hai cột xếp thành một cột.
 
 Form lấy danh sách ngôn ngữ từ backend, gửi mã nguồn lên API chấm Judge0 và
 hiển thị verdict, điểm, số testcase qua/tổng, runtime và bộ nhớ. Trang không
@@ -65,23 +69,23 @@ parameters có thể truyền trực tiếp trong URL:
 
 | Tham số | Ý nghĩa |
 |---|---|
-| `problem_id` | Chỉ lấy bài nộp thuộc bài tập này |
-| `account_id` | Chỉ lấy bài nộp của tài khoản này |
+| `problem_name` | Tìm theo một phần tên bài tập, không phân biệt hoa thường |
+| `account_name` | Tìm theo một phần tên người nộp, không phân biệt hoa thường |
+| `problem_id` | Bộ lọc ID tương thích cho các liên kết cũ |
+| `account_id` | Bộ lọc ID tương thích cho các liên kết cũ |
 
 Ví dụ:
 
 ```text
 modules/submissions.html
-modules/submissions.html?problem_id=42
-modules/submissions.html?account_id=7
-modules/submissions.html?problem_id=42&account_id=7
+modules/submissions.html?problem_name=Two%20Sum
+modules/submissions.html?account_name=Nguyen
 ```
 
-Khi URL có ít nhất một bộ lọc, trang hiển thị kết quả lọc và đồng thời giữ
-một feed **Bài nộp toàn server** độc lập, không bị lọc. Hai feed nằm cạnh nhau
-trên màn hình đủ rộng; ở màn hình hẹp chúng xếp dọc. Mỗi feed phân trang riêng
-và có nút tải các lượt cũ hơn. Form lọc trên trang cập nhật query parameters
-khi gửi; nút xóa bộ lọc trở về trang không có query.
+Bộ lọc nằm ở cột bên cạnh danh sách bài nộp; trên màn hình rộng danh sách chiếm
+khoảng hai phần ba chiều ngang, còn trên màn hình hẹp hai phần xếp dọc. Khi có
+bộ lọc, danh sách hiển thị kết quả khớp tên; nếu không, nó hiển thị bài nộp mới
+nhất toàn server. Các kết quả được phân trang và có nút tải các lượt cũ hơn.
 
 Feed toàn server hiển thị trạng thái của bài public và private cho người dùng
 đã đăng nhập. Metadata gồm người nộp, bài, trạng thái và các chỉ số chấm; API

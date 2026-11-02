@@ -18,9 +18,43 @@ function resolveApiBaseUrl() {
         return "http://127.0.0.1:8000";
     }
 
+    if (hostname.endsWith(".ngrok-free.app") || hostname.endsWith(".ngrok.io")) {
+        return "http://127.0.0.1:8000";
+    }
+
     const apiHostname = hostname.replace(/^\[|\]$/g, "");
     const formattedHostname = apiHostname.includes(":") ? `[${apiHostname}]` : apiHostname;
     return `${window.location.protocol}//${formattedHostname}:8000`;
+}
+
+export function isAdminRole(role) {
+    return role === "ADMIN" || role === "SUPER_ADMIN";
+}
+
+export function isSuperAdminRole(role) {
+    return role === "SUPER_ADMIN";
+}
+
+export async function requireAccountAccess({
+    allowedRoles = ["USER", "ADMIN", "SUPER_ADMIN"],
+    redirectTo = "login.html",
+} = {}) {
+    const response = await apiFetch("/auth/me");
+    if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+            window.location.replace(redirectTo);
+            return null;
+        }
+        throw new Error(`Không thể xác minh quyền truy cập (${response.status}).`);
+    }
+
+    const account = await response.json();
+    if (!allowedRoles.includes(account.role)) {
+        window.location.replace(redirectTo);
+        return null;
+    }
+
+    return account;
 }
 
 const configuredApiBaseUrl = resolveApiBaseUrl();

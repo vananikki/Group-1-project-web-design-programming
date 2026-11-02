@@ -4,30 +4,55 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Judge Admin</title>
-    <link rel="stylesheet" href="../assets/css/styles.css">
+    <link rel="stylesheet" href="../assets/css/styles.css?v=20261102d">
 </head>
-<body>
-    <main class="page-shell">
-        <header class="site-header">
+<body class="page-with-sidebar">
+    <main class="page-shell app-shell">
+        <header class="site-header topbar">
             <a class="brand" href="index.html">
                 <span class="brand-mark" aria-hidden="true">OJ</span>
                 <span>Online Judge</span>
             </a>
             <div class="button-row">
                 <a href="index.html">Tài khoản</a>
+                <a href="classroom_list.html">Lớp học</a>
                 <a href="problems.html">Kho bài tập</a>
                 <a href="create_problem.html">Tạo bài tập</a>
+                <a href="submissions.html">Lịch sử bài nộp</a>
                 <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
             </div>
         </header>
 
-        <section class="card dashboard-card">
-            <div class="dashboard-header">
-                <div>
-                    <h1>Quản lý bài, lớp học và contest</h1>
-                    <p class="page-subtitle">Tạo problem công khai/riêng tư, gán vào lớp và contest.</p>
+        <div class="workspace-layout">
+            <aside class="sidebar-panel" aria-label="Sidebar quản lý contest và bài tập">
+                <div class="sidebar-header">
+                    <span class="brand-mark" aria-hidden="true">OJ</span>
+                    <div>
+                        <strong>Quản trị</strong>
+                        <small>Problem & contest</small>
+                    </div>
                 </div>
-            </div>
+
+                <nav class="sidebar-nav" aria-label="Điều hướng quản trị">
+                    <a class="nav-item active" href="#problem-form">Bài tập</a>
+                    <a class="nav-item" href="#class-form">Lớp học</a>
+                    <a class="nav-item" href="#contest-form">Contest</a>
+                    <a class="nav-item" href="#submission-management">Bài nộp</a>
+                    <a class="nav-item" href="#class-detail-form">Chi tiết</a>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <button class="secondary" type="button" onclick="location.href='index.html'">Tài khoản</button>
+                </div>
+            </aside>
+
+            <section class="card content-panel">
+                <div class="dashboard-header">
+                    <div>
+                        <h1>Quản lý bài, lớp học và contest</h1>
+                        <p class="page-subtitle">Tạo problem công khai/riêng tư, gán vào lớp và contest.</p>
+                    </div>
+                </div>
 
             <div class="stacked-panel-grid">
                 <div class="panel-block">
@@ -50,6 +75,7 @@
                             <select name="access_modifier">
                                 <option value="private">Private</option>
                                 <option value="public">Public</option>
+                                <option value="hidden">Hidden</option>
                             </select>
                         </label>
                         <button type="submit">Tạo problem</button>
@@ -77,6 +103,7 @@
                             <select name="access_modifier">
                                 <option value="private">Private</option>
                                 <option value="public">Public</option>
+                                <option value="hidden">Hidden</option>
                             </select>
                         </label>
                         <button type="submit">Cập nhật problem</button>
@@ -185,8 +212,9 @@
                     <p id="contest-detail-message" class="message" role="status"></p>
                     <div id="contest-detail-output" class="entity-list"></div>
                 </div>
-            </div>
-        </section>
+                </div>
+            </section>
+        </div>
     </main>
     <script type="module" src="../assets/js/judge_admin.js?v=20261101c"></script>
 </body>

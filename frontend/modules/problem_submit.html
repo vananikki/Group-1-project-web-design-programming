@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nộp bài | Online Judge</title>
-    <link rel="stylesheet" href="../assets/css/styles.css?v=20261103a">
+    <title>Bài tập | Online Judge</title>
+    <link rel="stylesheet" href="../assets/css/styles.css?v=20261103b">
 </head>
 <body>
     <main class="page-shell">
@@ -14,8 +14,11 @@
                 <span>Online Judge</span>
             </a>
             <div class="button-row">
+                <a id="back-to-class" href="classroom_list.html" hidden>Quay lại lớp</a>
+                <a href="index.html">Tài khoản</a>
+                <a href="classroom_list.html">Lớp học</a>
                 <a href="problems.html">Kho bài tập</a>
-                <a id="problem-history-link" class="button-link" href="submissions.html" hidden>Lịch sử bài nộp</a>
+                <a id="problem-history-link" href="submissions.html" hidden>Lịch sử bài nộp</a>
                 <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
             </div>
         </header>
@@ -64,12 +67,13 @@
                         <textarea name="source_code" rows="18" required maxlength="65536" spellcheck="false" placeholder="Nhập mã nguồn..." disabled></textarea>
                     </label>
                     <button type="submit" disabled>Nộp và chấm bài</button>
+                    <p id="submit-access-note" class="field-hint" hidden></p>
                     <p id="submission-result" class="message" role="status" aria-live="polite"></p>
                 </form>
             </div>
             <p id="page-message" class="message" role="alert"></p>
         </section>
     </main>
-    <script type="module" src="../assets/js/problem_submit.js?v=20261103a"></script>
+    <script type="module" src="../assets/js/problem_submit.js?v=20261103b"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js?v=20261029a";
+import { apiFetch, readResponse, requireAccountAccess } from "./api.js?v=20261029a";
 import { typesetMath } from "./latex.js?v=20261101b";
 import { renderSubmissionHistory } from "./submission_history.js?v=20261102a";
 
@@ -8,15 +8,21 @@ const studentHome = document.getElementById("student-home");
 const workspace = document.getElementById("class-workspace");
 const adminTools = document.getElementById("admin-class-tools");
 const createClassForm = document.getElementById("create-class-form");
+const showCreateClassButton = document.getElementById("show-create-class");
+const cancelCreateClassButton = document.getElementById("cancel-create-class");
 let currentAccount;
 let activeClassId;
-let activeProblemId;
-let activeContestId;
+let managedClassId;
+let classListView = "my-classes";
+let contestProblemCatalog = [];
+let selectedContestProblemIds = [];
+const maxContestProblems = 20;
 const submissionHistoryPageSize = 50;
 let submissionHistoryOffset = 0;
-let languagesPromise;
 let managerSearchTimer;
 let managerSearchRequest = 0;
+let memberSearchTimer;
+let memberSearchRequest = 0;
 
 function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -28,10 +34,64 @@ function escapeHtml(value) {
     })[character]);
 }
 
+function truncateText(value, maxLength = 120) {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (!text) {
+        return "";
+    }
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return `${text.slice(0, maxLength).trimEnd()}…`;
+}
+
 function setMessage(element, text, isError = false) {
     element.textContent = text;
     element.classList.toggle("error", isError);
     element.classList.toggle("success", !isError && Boolean(text));
+}
+
+function renderContestProblemSelection() {
+    const picker = document.getElementById("contest-problem-picker");
+    const addButton = document.getElementById("add-contest-problem");
+    const selectedList = document.getElementById("contest-selected-problems");
+    const selectionStatus = document.getElementById("contest-problem-selection-status");
+    const submitButton = document.getElementById("create-contest-button");
+    if (!picker || !addButton || !selectedList || !selectionStatus || !submitButton) {
+        return;
+    }
+
+    const selectedIds = new Set(selectedContestProblemIds);
+    const remaining = contestProblemCatalog.filter((problem) => !selectedIds.has(problem.problem_id));
+    picker.innerHTML = remaining.length
+        ? `<option value="">Chọn bài để thêm...</option>${remaining.map((problem) =>
+            `<option value="${problem.problem_id}">${escapeHtml(problem.problem_name)}</option>`
+        ).join("")}`
+        : `<option value="">${selectedContestProblemIds.length >= maxContestProblems
+            ? "Đã đạt giới hạn 20 bài"
+            : "Đã thêm hết bài trong lớp"}</option>`;
+    picker.value = "";
+    addButton.disabled = remaining.length === 0 || selectedContestProblemIds.length >= maxContestProblems;
+
+    selectedList.innerHTML = selectedContestProblemIds.map((problemId, index) => {
+        const problem = contestProblemCatalog.find((item) => item.problem_id === problemId);
+        if (!problem) {
+            return "";
+        }
+        return `<li class="contest-selected-problem">
+            <span class="contest-problem-order">Bài ${index + 1}</span>
+            <strong class="contest-selected-problem-name">${escapeHtml(problem.problem_name)}</strong>
+            <span class="contest-selected-problem-actions">
+                <button class="secondary" type="button" data-contest-action="up" data-index="${index}" aria-label="Đưa ${escapeHtml(problem.problem_name)} lên trước" ${index === 0 ? "disabled" : ""}>↑</button>
+                <button class="secondary" type="button" data-contest-action="down" data-index="${index}" aria-label="Đưa ${escapeHtml(problem.problem_name)} xuống sau" ${index === selectedContestProblemIds.length - 1 ? "disabled" : ""}>↓</button>
+                <button class="secondary" type="button" data-contest-action="remove" data-index="${index}" aria-label="Bỏ ${escapeHtml(problem.problem_name)} khỏi cuộc thi">×</button>
+            </span>
+        </li>`;
+    }).join("");
+    selectionStatus.textContent = selectedContestProblemIds.length
+        ? `${selectedContestProblemIds.length}/${maxContestProblems} bài đã chọn. Thứ tự bên trên sẽ là số bài trong contest.`
+        : "Chưa chọn bài tập nào.";
+    submitButton.disabled = selectedContestProblemIds.length === 0;
 }
 
 function renderProblemMath(element) {
@@ -45,7 +105,9 @@ async function requestJson(path, options) {
     const response = await apiFetch(path, options);
     const data = await readResponse(response);
     if (!response.ok) {
-        throw new Error(data.detail || `Yêu cầu thất bại (${response.status})`);
+        const error = new Error(data.detail || `Yêu cầu thất bại (${response.status})`);
+        error.status = response.status;
+        throw error;
     }
     return data;
 }
@@ -54,7 +116,7 @@ function classCard(item, { joined = false, managed = false } = {}) {
     const actions = managed
         ? item.is_claimable
             ? `<button type="button" data-action="claim-class" data-class-id="${item.class_id}">Nhận quyền quản lý</button>`
-            : `<button type="button" data-action="open-admin-class" data-class-id="${item.class_id}">Mở lớp</button>`
+            : `<button type="button" data-action="open-admin-class" data-class-id="${item.class_id}">Vào lớp</button>`
         : joined
             ? `<button type="button" data-action="open-student-class" data-class-id="${item.class_id}">Vào lớp</button>`
             : item.membership_status === "pending"
@@ -82,6 +144,29 @@ function renderCards(element, items, options = {}) {
     element.innerHTML = items.map((item) => classCard(item, options)).join("");
 }
 
+function bindSidebarNavigation() {
+    document.querySelectorAll(".nav-item").forEach((navItem) => {
+        navItem.addEventListener("click", (event) => {
+            const targetId = navItem.getAttribute("href");
+            if (!targetId?.startsWith("#") || targetId === "#") {
+                document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+                navItem.classList.add("active");
+                return;
+            }
+
+            const target = document.getElementById(targetId.slice(1));
+            if (!target) {
+                return;
+            }
+
+            event.preventDefault();
+            document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item === navItem));
+            target.scrollIntoView({ behavior: "smooth", block: "start" });
+            history.replaceState(null, "", targetId);
+        });
+    });
+}
+
 async function loadAdminClasses() {
     const classes = await requestJson("/admin/judge/academic-classes");
     renderCards(document.getElementById("managed-class-list"), classes, {
@@ -105,30 +190,78 @@ async function loadStudentClasses() {
 }
 
 function showHome() {
-    workspace.hidden = true;
-    adminHome.hidden = currentAccount.role === "USER";
-    studentHome.hidden = currentAccount.role !== "USER";
+    if (workspace) {
+        workspace.hidden = true;
+    }
+    if (adminHome) {
+        adminHome.hidden = currentAccount.role === "USER";
+    }
+    if (studentHome) {
+        studentHome.hidden = currentAccount.role !== "USER";
+    }
+    const sidebar = document.querySelector(".sidebar-panel");
+    if (sidebar) {
+        sidebar.hidden = true;
+    }
+    const classToolsNav = document.getElementById("class-tools-nav");
+    if (classToolsNav) {
+        classToolsNav.hidden = true;
+    }
+    window.location.href = "classroom_list.html?view=my-classes";
 }
 
 async function openClass(classId, isStudent) {
     activeClassId = Number(classId);
     clearTimeout(managerSearchTimer);
     managerSearchRequest += 1;
-    activeContestId = null;
+    clearTimeout(memberSearchTimer);
+    memberSearchRequest += 1;
     pageMessage.textContent = "";
-    const data = await requestJson(
-        isStudent
-            ? `/student/classes/${activeClassId}`
-            : `/admin/judge/academic-classes/${activeClassId}`,
-    );
-    adminHome.hidden = true;
-    studentHome.hidden = true;
+
+    let data;
+    let resolvedAsStudent = isStudent;
+    try {
+        data = await requestJson(
+            resolvedAsStudent
+                ? `/student/classes/${activeClassId}`
+                : `/admin/judge/academic-classes/${activeClassId}`,
+        );
+    } catch (error) {
+        if (!resolvedAsStudent && (error.status === 403 || error.status === 404)) {
+            resolvedAsStudent = true;
+            try {
+                data = await requestJson(`/student/classes/${activeClassId}`);
+            } catch (fallbackError) {
+                if (fallbackError.status === 403 || fallbackError.status === 404) {
+                    setMessage(pageMessage, fallbackError.message || "Bạn chưa tham gia lớp này.", true);
+                    return;
+                }
+                throw fallbackError;
+            }
+        } else if (error.status === 403 || error.status === 404) {
+            setMessage(pageMessage, error.message || "Bạn không có quyền truy cập lớp này.", true);
+            return;
+        } else {
+            throw error;
+        }
+    }
+    if (adminHome) {
+        adminHome.hidden = true;
+    }
+    if (studentHome) {
+        studentHome.hidden = true;
+    }
     workspace.hidden = false;
+    document.querySelector(".sidebar-panel").hidden = false;
+    document.getElementById("class-tools-nav").hidden = false;
     document.getElementById("workspace-title").textContent = data.class_name;
     document.getElementById("workspace-meta").textContent =
         `Lớp #${data.class_id} · ${(data.problems || []).length} bài tập · ${(data.contests || []).length} cuộc thi`;
 
-    const canManage = !isStudent;
+    const canManage = !resolvedAsStudent;
+    if (canManage) {
+        managedClassId = activeClassId;
+    }
     const canManagePermissions = canManage && (
         currentAccount.role === "SUPER_ADMIN" || data.is_owner
     );
@@ -136,42 +269,99 @@ async function openClass(classId, isStudent) {
     adminTools.hidden = !canManage;
     document.getElementById("join-request-tools").hidden = !canReviewJoinRequests;
     document.getElementById("manager-tools").hidden = !canManagePermissions;
-    document.getElementById("class-members-panel").hidden = !canManage;
-    document.getElementById("member-list").innerHTML = canManage
-        ? (data.students || []).map((member) => `<div class="entity-row">
-            <span><strong>${escapeHtml(member.account_name)}</strong><small>${escapeHtml(member.account_email)}</small></span>
-            <button class="secondary" type="button" data-action="remove-member" data-account-id="${member.account_id}">Gỡ khỏi lớp</button>
-        </div>`).join("") || `<p class="field-hint">Chưa có thành viên.</p>`
-        : "";
+    const members = data.students || [];
+    const isCurrentAccountMember = members.some(
+        (member) => member.account_id === currentAccount.account_id,
+    );
+    const studentModeSwitch = document.getElementById("student-mode-switch");
+    const managementModeSwitch = document.getElementById("management-mode-switch");
+    studentModeSwitch.hidden = !(
+        canManage &&
+        isCurrentAccountMember &&
+        currentAccount.role !== "USER"
+    );
+    managementModeSwitch.hidden = !(
+        resolvedAsStudent &&
+        managedClassId === activeClassId &&
+        currentAccount.role !== "USER"
+    );
+    const ownerId = data.owner_account_id ?? null;
+    const studentMembers = members.filter((member) => {
+        const isOwner = ownerId !== null && member.account_id === ownerId;
+        return !isOwner && (member.account_role || "USER") === "USER";
+    });
+    document.getElementById("class-members-panel").hidden = false;
+    document.getElementById("member-count-badge").textContent = String(studentMembers.length);
+    document.getElementById("member-list").innerHTML = members.map((member) => {
+        const isOwner = ownerId !== null && member.account_id === ownerId;
+        const roleValue = isOwner
+            ? "Chủ lớp"
+            : member.account_role === "SUPER_ADMIN"
+                ? "Quản trị cấp cao"
+                : member.account_role === "ADMIN"
+                    ? "Quản trị viên"
+                    : "Học viên";
+        const roleClass = isOwner
+            ? "owner"
+            : member.account_role === "USER"
+                ? "student"
+                : "manager";
+        const canRemove = canManagePermissions && !isOwner;
+        return `
+            <div class="member-item">
+                <div class="member-item-main">
+                    <strong>${escapeHtml(member.account_name)}</strong>
+                    <small>${escapeHtml(member.account_email)}</small>
+                </div>
+                <div class="member-item-meta">
+                    <span class="member-role ${roleClass}">${roleValue}</span>
+                    ${canRemove ? `<button class="secondary" type="button" data-action="remove-member" data-account-id="${member.account_id}">Gỡ khỏi lớp</button>` : ""}
+                </div>
+            </div>`;
+    }).join("") || `<p class="field-hint">Chưa có thành viên.</p>`;
+    const memberInviteTools = document.getElementById("member-invite-tools");
+    if (memberInviteTools) {
+        memberInviteTools.hidden = !canManagePermissions;
+    }
 
-    document.getElementById("class-problem-list").innerHTML = (data.problems || []).map((problem) => `
-        <article class="problem-card">
-            <div>
-                <p class="class-card-kicker">BÀI TẬP · #${escapeHtml(problem.problem_id)}</p>
-                <h4>${escapeHtml(problem.problem_name)}</h4>
-                ${problem.description?.trim() ? `<p>${escapeHtml(problem.description)}</p>` : ""}
-                ${problem.is_required ? `<span class="status-pill">Bắt buộc</span>` : ""}
-            </div>
-            <a class="button-link secondary" href="problem_statement.html?problem_id=${encodeURIComponent(problem.problem_id)}&source=class&class_id=${encodeURIComponent(activeClassId)}">Xem đề bài</a>
-            ${isStudent ? `<button type="button" data-action="solve-problem" data-problem-id="${problem.problem_id}">Nộp lời giải</button>` : ""}
-        </article>`).join("") || `<div class="empty-state"><p>Lớp chưa có bài tập.</p></div>`;
+    document.getElementById("class-problem-list").innerHTML = (data.problems || []).map((problem) => {
+        const shortDescription = truncateText(problem.description || "", 120);
+        return `
+            <a class="problem-card problem-card-link" href="problem_submit.html?problem_id=${encodeURIComponent(problem.problem_id)}&source=class&class_id=${encodeURIComponent(activeClassId)}&from=${encodeURIComponent(classListView)}">
+                <div>
+                    <p class="class-card-kicker">BÀI TẬP · #${escapeHtml(problem.problem_id)}</p>
+                    <h4>${escapeHtml(problem.problem_name)}</h4>
+                    ${problem.description?.trim() ? `<p>${escapeHtml(shortDescription)}</p>` : ""}
+                    ${problem.is_required ? `<span class="status-pill">Bắt buộc</span>` : ""}
+                </div>
+                <span class="problem-card-open-hint">${resolvedAsStudent ? "Xem đề và nộp →" : "Xem đề →"}</span>
+            </a>`;
+    }).join("") || `<div class="empty-state"><p>Lớp chưa có bài tập.</p></div>`;
     renderProblemMath(document.getElementById("class-problem-list"));
-    document.getElementById("class-contest-list").innerHTML = (data.contests || []).map((contest) => `
-        <article class="problem-card">
-            <div><p class="class-card-kicker">CUỘC THI · ${escapeHtml(contest.status)}</p><h4>${escapeHtml(contest.contest_name)}</h4></div>
-            <span>${new Date(contest.start_time).toLocaleString()} – ${new Date(contest.end_time).toLocaleString()}</span>
-            ${isStudent ? `<button type="button" data-action="open-contest" data-contest-id="${contest.contest_id}">Mở cuộc thi</button>` : ""}
-        </article>`).join("") || `<div class="empty-state"><p>Chưa có cuộc thi nào.</p></div>`;
+    document.getElementById("class-contest-list").innerHTML = (data.contests || []).map((contest) => {
+        const isActive = contest.status === "active";
+        const statusLabel = isActive ? "ĐANG DIỄN RA" : contest.status === "upcoming" ? "SẮP DIỄN RA" : "ĐÃ KẾT THÚC";
+        const action = resolvedAsStudent
+            ? isActive
+                ? `<a class="button-link" href="contest.html?class_id=${encodeURIComponent(activeClassId)}&contest_id=${encodeURIComponent(contest.contest_id)}&from=${encodeURIComponent(classListView)}">Vào cuộc thi</a>`
+                : `<button type="button" disabled>${statusLabel}</button>`
+            : canManage && isActive
+                ? `<a class="button-link secondary" href="contest.html?class_id=${encodeURIComponent(activeClassId)}&contest_id=${encodeURIComponent(contest.contest_id)}&from=${encodeURIComponent(classListView)}">Xem cuộc thi</a>`
+                : "";
+        return `
+            <article class="problem-card">
+                <div><p class="class-card-kicker">CUỘC THI · ${statusLabel}</p><h4>${escapeHtml(contest.contest_name)}</h4></div>
+                <span>${new Date(contest.start_time).toLocaleString()} – ${new Date(contest.end_time).toLocaleString()}</span>
+                ${action}
+            </article>`;
+    }).join("") || `<div class="empty-state"><p>Chưa có cuộc thi nào.</p></div>`;
     renderProblemMath(document.getElementById("class-contest-list"));
 
     if (canManage) {
         await loadAttachableProblems(data.problems || []);
-        const contestProblemSelect = document.getElementById("contest-problem-select");
-        contestProblemSelect.innerHTML = (data.problems || []).map((problem) =>
-            `<option value="${problem.problem_id}">${escapeHtml(problem.problem_name)}</option>`
-        ).join("");
-        document.getElementById("create-contest-form").querySelector('[type="submit"]').disabled =
-            !data.problems?.length;
+        contestProblemCatalog = data.problems || [];
+        selectedContestProblemIds = [];
+        renderContestProblemSelection();
         document.getElementById("create-contest-message").textContent = data.problems?.length
             ? ""
             : "Thêm ít nhất một bài tập vào lớp trước khi tạo cuộc thi.";
@@ -179,6 +369,7 @@ async function openClass(classId, isStudent) {
             await loadJoinRequests(activeClassId);
         }
         await loadManagers(activeClassId, canManagePermissions);
+        await loadAvailableMembers(activeClassId, canManagePermissions);
     } else {
         document.getElementById("submission-history").hidden = false;
         await loadSubmissionHistory(activeClassId);
@@ -199,9 +390,14 @@ async function loadAttachableProblems(classProblems) {
         }
         const attachedIds = new Set(classProblems.map((problem) => problem.problem_id));
         const candidates = library.filter((problem) => !attachedIds.has(problem.problem_id));
-        picker.innerHTML = `<option value="">Chọn bài tập để thêm</option>${candidates.map((problem) =>
-            `<option value="${problem.problem_id}">${escapeHtml(problem.problem_name)} · ${problem.access_modifier === "public" ? "Public" : "Private"}</option>`
-        ).join("")}`;
+        picker.innerHTML = `<option value="">Chọn bài tập để thêm</option>${candidates.map((problem) => {
+            const label = problem.access_modifier === "public"
+                ? "Public"
+                : problem.access_modifier === "hidden"
+                    ? "Hidden"
+                    : "Private";
+            return `<option value="${problem.problem_id}">${escapeHtml(problem.problem_name)} · ${label}</option>`;
+        }).join("")}`;
         if (!candidates.length) {
             setMessage(document.getElementById("add-problem-message"), "Không còn bài trong kho của bạn hoặc bài public để thêm.");
         }
@@ -245,6 +441,7 @@ async function loadManagers(classId, canManagePermissions) {
     const availableList = document.getElementById("available-manager-list");
     availableList.replaceChildren();
     if (!canManagePermissions) {
+        search.oninput = null;
         return;
     }
 
@@ -252,8 +449,7 @@ async function loadManagers(classId, canManagePermissions) {
     search.oninput = () => {
         clearTimeout(managerSearchTimer);
         const query = search.value.trim();
-        managerSearchRequest += 1;
-        const requestId = managerSearchRequest;
+        const requestId = ++managerSearchRequest;
         if (query.length < 2) {
             availableList.innerHTML = `<p class="field-hint">Nhập ít nhất 2 ký tự để tìm.</p>`;
             return;
@@ -284,16 +480,53 @@ async function loadManagers(classId, canManagePermissions) {
     };
 }
 
-async function loadLanguages() {
-    languagesPromise ??= requestJson("/student/languages");
-    const languages = await languagesPromise;
-    const selector = document.getElementById("solution-language");
-    selector.innerHTML = languages.map((language) =>
-        `<option value="${language.language_id}">${escapeHtml(language.name)}</option>`
-    ).join("");
-    if (!languages.length) {
-        throw new Error("Chưa có ngôn ngữ chấm bài. Hãy đồng bộ danh sách Judge0 languages trước.");
+async function loadAvailableMembers(classId, canManagePermissions) {
+    const search = document.getElementById("member-search");
+    const availableList = document.getElementById("available-member-list");
+    const memberMessage = document.getElementById("member-message");
+    if (!search || !availableList || !memberMessage) {
+        return;
     }
+    if (!canManagePermissions) {
+        availableList.replaceChildren();
+        memberMessage.textContent = "";
+        search.oninput = null;
+        return;
+    }
+
+    availableList.innerHTML = `<p class="field-hint">Nhập tên hoặc email để tìm thành viên.</p>`;
+    search.oninput = () => {
+        clearTimeout(memberSearchTimer);
+        const query = search.value.trim();
+        const requestId = ++memberSearchRequest;
+        if (query.length < 2) {
+            availableList.innerHTML = `<p class="field-hint">Nhập ít nhất 2 ký tự để tìm.</p>`;
+            return;
+        }
+        availableList.innerHTML = `<p class="field-hint">Đang tìm...</p>`;
+        memberSearchTimer = setTimeout(async () => {
+            try {
+                const candidates = await requestJson(
+                    `/admin/judge/academic-classes/${classId}/available-students?search=${encodeURIComponent(query)}`,
+                );
+                if (requestId !== memberSearchRequest || classId !== activeClassId) {
+                    return;
+                }
+                availableList.innerHTML = candidates.map((candidate) => `
+                    <div class="entity-row">
+                        <span><strong>${escapeHtml(candidate.account_name)}</strong><small>${escapeHtml(candidate.account_email)} · ${candidate.role === "ADMIN" ? "Quản trị viên" : candidate.role === "SUPER_ADMIN" ? "Quản trị cấp cao" : "Học viên"}</small></span>
+                        <button type="button" data-action="add-member" data-account-id="${candidate.account_id}">Mời</button>
+                    </div>
+                `).join("") || `<p class="field-hint">Không tìm thấy thành viên phù hợp.</p>`;
+            } catch (error) {
+                if (requestId !== memberSearchRequest || classId !== activeClassId) {
+                    return;
+                }
+                console.error(error);
+                availableList.innerHTML = `<p class="field-hint error">${escapeHtml(error.message || "Không thể tìm thành viên.")}</p>`;
+            }
+        }, 250);
+    };
 }
 
 async function loadSubmissionHistory(classId, { append = false } = {}) {
@@ -311,58 +544,36 @@ async function loadSubmissionHistory(classId, { append = false } = {}) {
         history.length < submissionHistoryPageSize;
 }
 
-async function openContest(contestId) {
-    const [contest, standings] = await Promise.all([
-        requestJson(`/student/classes/${activeClassId}/contests/${contestId}`),
-        requestJson(`/student/classes/${activeClassId}/contests/${contestId}/standings`),
-    ]);
-    activeContestId = Number(contestId);
-    document.getElementById("contest-heading").textContent = contest.contest_name;
-    document.getElementById("contest-description").textContent = contest.description || "";
-    document.getElementById("contest-status").textContent =
-        contest.status === "active" ? "ĐANG DIỄN RA" : contest.status === "upcoming" ? "SẮP DIỄN RA" : "ĐÃ KẾT THÚC";
-    document.getElementById("contest-time").textContent =
-        `${new Date(contest.start_time).toLocaleString()} – ${new Date(contest.end_time).toLocaleString()}`;
-    document.getElementById("contest-problem-list").innerHTML = contest.problems.map((problem) => `
-        <article class="problem-card">
-            <div>
-                <p class="class-card-kicker">BÀI ${escapeHtml(problem.problem_order ?? "—")} · #${escapeHtml(problem.problem_id)}</p>
-                <h4>${escapeHtml(problem.problem_name)} ${problem.is_solved ? "✓" : ""}</h4>
-                ${problem.description?.trim() ? `<p>${escapeHtml(problem.description)}</p>` : ""}
-                <a class="button-link secondary" href="problem_statement.html?problem_id=${encodeURIComponent(problem.problem_id)}&source=class&class_id=${encodeURIComponent(activeClassId)}">Xem đề bài</a>
-            </div>
-            ${contest.can_submit ? `<button type="button" data-action="solve-contest-problem" data-problem-id="${problem.problem_id}">Nộp bài</button>` : ""}
-        </article>`).join("") || `<div class="empty-state"><p>Cuộc thi chưa có bài thi.</p></div>`;
-    renderProblemMath(document.getElementById("contest-problem-list"));
-    document.getElementById("contest-standings").innerHTML = standings.standings.map((participant) => `
-        <div class="entity-row ${participant.is_current_user ? "current-participant" : ""}">
-            <span><strong>#${participant.rank} · ${escapeHtml(participant.account_name)}</strong><small>${participant.solved} bài giải đúng · ${participant.penalty} lượt sai</small></span>
-            <strong>${participant.score} điểm</strong>
-        </div>`).join("") || `<p class="field-hint">Chưa có bài nộp nào.</p>`;
-    document.getElementById("contest-dialog").showModal();
-}
-
 async function initialize() {
+    bindSidebarNavigation();
+    const params = new URLSearchParams(window.location.search);
+    const classId = params.get("class_id");
+    if (!classId || !/^\d+$/.test(classId)) {
+        window.location.replace("classroom_list.html");
+        return;
+    }
+
     try {
-        const response = await apiFetch("/auth/me");
-        if (!response.ok) {
-            window.location.replace("login.html");
+        currentAccount = await requireAccountAccess({
+            allowedRoles: ["USER", "ADMIN", "SUPER_ADMIN"],
+            redirectTo: "login.html",
+        });
+        if (!currentAccount) {
             return;
         }
-        currentAccount = await response.json();
-        if (currentAccount.role === "USER") {
-            document.getElementById("page-heading").textContent = "Lớp học của tôi";
-            document.getElementById("page-subtitle").textContent =
-                "Xin tham gia lớp học để mở bài tập và cuộc thi được giao.";
-            studentHome.hidden = false;
-            await loadStudentClasses();
+        const requestedListView = params.get("from");
+        classListView = currentAccount.role !== "USER" && requestedListView !== "my-classes"
+            ? "managed-classes"
+            : "my-classes";
+        document.getElementById("back-to-class-list").href =
+            `classroom_list.html?view=${classListView}`;
+        const isStudent = currentAccount.role === "USER";
+        const openAsStudent = isStudent || classListView === "my-classes";
+        if (openAsStudent) {
+            await openClass(classId, true);
         } else {
             document.getElementById("advanced-admin-link").hidden = false;
-            document.getElementById("page-heading").textContent = "Không gian quản lý lớp";
-            document.getElementById("page-subtitle").textContent =
-                "Tổ chức lớp học, quản lý quyền truy cập và chuẩn bị bài tập cho học viên.";
-            adminHome.hidden = false;
-            await loadAdminClasses();
+            await openClass(classId, false);
         }
     } catch (error) {
         console.error(error);
@@ -370,35 +581,88 @@ async function initialize() {
     }
 }
 
-document.getElementById("show-create-class").addEventListener("click", () => {
-    createClassForm.hidden = false;
-    document.getElementById("new-class-name").focus();
-});
+if (showCreateClassButton) {
+    showCreateClassButton.addEventListener("click", () => {
+        if (!createClassForm) return;
+        createClassForm.hidden = false;
+        const newClassNameInput = document.getElementById("new-class-name");
+        if (newClassNameInput) {
+            newClassNameInput.focus();
+        }
+    });
+}
 
-document.getElementById("cancel-create-class").addEventListener("click", () => {
-    createClassForm.reset();
-    createClassForm.hidden = true;
-});
-
-createClassForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = createClassForm.querySelector('[type="submit"]');
-    button.disabled = true;
-    try {
-        await requestJson("/admin/judge/academic-classes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ class_name: new FormData(createClassForm).get("class_name") }),
-        });
+if (cancelCreateClassButton && createClassForm) {
+    cancelCreateClassButton.addEventListener("click", () => {
         createClassForm.reset();
         createClassForm.hidden = true;
-        setMessage(document.getElementById("create-class-message"), "Đã tạo lớp mới. Bạn đang là chủ lớp.");
-        await loadAdminClasses();
-    } catch (error) {
-        setMessage(document.getElementById("create-class-message"), error.message, true);
-    } finally {
-        button.disabled = false;
+    });
+}
+
+if (createClassForm) {
+    createClassForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = createClassForm.querySelector('[type="submit"]');
+        button.disabled = true;
+        try {
+            await requestJson("/admin/judge/academic-classes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ class_name: new FormData(createClassForm).get("class_name") }),
+            });
+            createClassForm.reset();
+            createClassForm.hidden = true;
+            setMessage(document.getElementById("create-class-message"), "Đã tạo lớp mới. Bạn đang là chủ lớp.");
+            await loadAdminClasses();
+        } catch (error) {
+            setMessage(document.getElementById("create-class-message"), error.message, true);
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
+document.getElementById("contest-problem-picker").addEventListener("change", (event) => {
+    const selectedCount = selectedContestProblemIds.length;
+    document.getElementById("add-contest-problem").disabled =
+        !event.currentTarget.value || selectedCount >= maxContestProblems;
+});
+
+document.getElementById("add-contest-problem").addEventListener("click", () => {
+    const picker = document.getElementById("contest-problem-picker");
+    const problemId = Number(picker.value);
+    if (!problemId || selectedContestProblemIds.includes(problemId) ||
+        selectedContestProblemIds.length >= maxContestProblems) {
+        return;
     }
+    selectedContestProblemIds.push(problemId);
+    renderContestProblemSelection();
+    setMessage(document.getElementById("create-contest-message"), "");
+});
+
+document.getElementById("contest-selected-problems").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-contest-action]");
+    if (!button) {
+        return;
+    }
+
+    const index = Number(button.dataset.index);
+    if (!Number.isInteger(index) || index < 0 || index >= selectedContestProblemIds.length) {
+        return;
+    }
+    if (button.dataset.contestAction === "remove") {
+        selectedContestProblemIds.splice(index, 1);
+    } else {
+        const offset = button.dataset.contestAction === "up" ? -1 : 1;
+        const nextIndex = index + offset;
+        if (nextIndex < 0 || nextIndex >= selectedContestProblemIds.length) {
+            return;
+        }
+        [selectedContestProblemIds[index], selectedContestProblemIds[nextIndex]] =
+            [selectedContestProblemIds[nextIndex], selectedContestProblemIds[index]];
+    }
+    renderContestProblemSelection();
+    setMessage(document.getElementById("create-contest-message"), "");
 });
 
 document.body.addEventListener("click", async (event) => {
@@ -419,28 +683,11 @@ document.body.addEventListener("click", async (event) => {
             case "open-student-class":
                 await openClass(classId, true);
                 break;
-            case "solve-problem":
-                activeProblemId = Number(button.dataset.problemId);
-                activeContestId = null;
-                document.getElementById("solution-heading").textContent =
-                    button.closest(".problem-card").querySelector("h4").textContent;
-                document.getElementById("solution-form").elements.source_code.value = "";
-                setMessage(document.getElementById("submission-result"), "");
-                await loadLanguages();
-                document.getElementById("solution-dialog").showModal();
+            case "switch-to-student":
+                await openClass(activeClassId, true);
                 break;
-            case "open-contest":
-                await openContest(button.dataset.contestId);
-                break;
-            case "solve-contest-problem":
-                activeProblemId = Number(button.dataset.problemId);
-                document.getElementById("contest-dialog").close();
-                document.getElementById("solution-heading").textContent =
-                    button.closest(".problem-card").querySelector("h4").textContent.replace("✓", "").trim();
-                document.getElementById("solution-form").elements.source_code.value = "";
-                setMessage(document.getElementById("submission-result"), "");
-                await loadLanguages();
-                document.getElementById("solution-dialog").showModal();
+            case "switch-to-management":
+                await openClass(activeClassId, false);
                 break;
             case "request-join":
                 await requestJson(`/student/classes/${classId}/join-requests`, { method: "POST" });
@@ -482,6 +729,15 @@ document.body.addEventListener("click", async (event) => {
                 await loadManagers(activeClassId, true);
                 document.getElementById("manager-search").dispatchEvent(new Event("input"));
                 break;
+            case "add-member":
+                await requestJson(`/admin/judge/academic-classes/${activeClassId}/students`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ account_id: Number(button.dataset.accountId) }),
+                });
+                setMessage(document.getElementById("member-message"), "Đã mời thành viên vào lớp.");
+                await openClass(activeClassId, false);
+                break;
         }
     } catch (error) {
         setMessage(pageMessage, error.message || "Thao tác không thành công.", true);
@@ -490,61 +746,9 @@ document.body.addEventListener("click", async (event) => {
     }
 });
 
-document.getElementById("close-solution").addEventListener("click", () => {
-    document.getElementById("solution-dialog").close();
+document.getElementById("back-to-classes").addEventListener("click", () => {
+    window.location.href = `classroom_list.html?view=${classListView}`;
 });
-
-document.getElementById("close-contest").addEventListener("click", () => {
-    document.getElementById("contest-dialog").close();
-    activeContestId = null;
-});
-
-document.getElementById("contest-dialog").addEventListener("click", (event) => {
-    if (event.target === event.currentTarget) {
-        event.currentTarget.close();
-        activeContestId = null;
-    }
-});
-
-document.getElementById("solution-dialog").addEventListener("click", (event) => {
-    if (event.target === event.currentTarget) event.currentTarget.close();
-});
-
-document.getElementById("solution-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('[type="submit"]');
-    const resultElement = document.getElementById("submission-result");
-    button.disabled = true;
-    setMessage(resultElement, "Đang gửi lời giải tới hệ thống chấm bài...");
-    const values = new FormData(form);
-    try {
-        const result = await requestJson(
-            `/student/classes/${activeClassId}/problems/${activeProblemId}/submissions`,
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    language_id: Number(values.get("language_id")),
-                    source_code: values.get("source_code"),
-                    ...(activeContestId ? { contest_id: activeContestId } : {}),
-                }),
-            },
-        );
-        setMessage(
-            resultElement,
-            `${result.status} · ${result.score} điểm · ${result.passed_testcases}/${result.total_testcases} test case · tổng ${result.runtime_ms == null ? "—" : `${result.runtime_ms} ms`} · bộ nhớ đỉnh ${result.memory_kb == null ? "—" : `${result.memory_kb} KB`}`,
-            result.status !== "Accepted",
-        );
-        await loadSubmissionHistory(activeClassId);
-    } catch (error) {
-        setMessage(resultElement, error.message || "Không thể chấm lời giải.", true);
-    } finally {
-        button.disabled = false;
-    }
-});
-
-document.getElementById("back-to-classes").addEventListener("click", showHome);
 
 document.getElementById("class-submission-history-more").addEventListener("click", async (event) => {
     const button = event.currentTarget;
@@ -594,6 +798,13 @@ document.getElementById("create-contest-form").addEventListener("submit", async 
     button.disabled = true;
     const values = new FormData(form);
     try {
+        if (!selectedContestProblemIds.length) {
+            throw new Error("Hãy thêm ít nhất một bài tập vào danh sách contest.");
+        }
+        if (selectedContestProblemIds.length > maxContestProblems) {
+            throw new Error(`Một contest chỉ được có tối đa ${maxContestProblems} bài.`);
+        }
+        const problemCount = selectedContestProblemIds.length;
         const start = new Date(values.get("start_time"));
         const end = new Date(values.get("end_time"));
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
@@ -609,31 +820,37 @@ document.getElementById("create-contest-form").addEventListener("submit", async 
                     description: values.get("description"),
                     start_time: start.toISOString(),
                     end_time: end.toISOString(),
-                    problem_ids: values.getAll("problem_ids").map(Number),
+                    problem_ids: [...selectedContestProblemIds],
                 }),
             },
         );
         form.reset();
+        await openClass(activeClassId, false);
         setMessage(
             document.getElementById("create-contest-message"),
-            `Đã tạo cuộc thi "${contest.contest_name}" với ${contest.problem_count} bài.`,
+            `Đã tạo cuộc thi "${contest.contest_name}" với ${problemCount} bài.`,
         );
-        await openClass(activeClassId, false);
     } catch (error) {
         setMessage(document.getElementById("create-contest-message"), error.message, true);
     } finally {
-        button.disabled = false;
+        renderContestProblemSelection();
     }
 });
 
-document.getElementById("logout-button").addEventListener("click", async () => {
-    try {
-        const response = await apiFetch("/auth/logout", { method: "POST" });
-        if (response.ok) window.location.replace("login.html");
-        else setMessage(pageMessage, `Không thể đăng xuất (${response.status}).`, true);
-    } catch (error) {
-        setMessage(pageMessage, error.message || "Không thể kết nối đến server.", true);
-    }
-});
+const logoutButton = document.getElementById("logout-button");
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        try {
+            const response = await apiFetch("/auth/logout", { method: "POST" });
+            if (response.ok) {
+                window.location.replace("login.html");
+                return;
+            }
+            setMessage(pageMessage, `Không thể đăng xuất (${response.status}).`, true);
+        } catch (error) {
+            setMessage(pageMessage, error.message || "Không thể kết nối đến server.", true);
+        }
+    });
+}
 
 initialize();

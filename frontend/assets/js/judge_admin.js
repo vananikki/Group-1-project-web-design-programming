@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js?v=20261029a";
+import { apiFetch, readResponse, requireAccountAccess } from "./api.js?v=20261029a";
 
 const problemForm = document.getElementById("problem-form");
 const problemEditForm = document.getElementById("problem-edit-form");
@@ -34,25 +34,23 @@ const lists = {
 let currentAccountRole;
 
 async function ensureAdminAccess() {
-    const response = await apiFetch("/auth/me");
-    if (!response.ok) {
-        window.location.replace("login.html");
+    const account = await requireAccountAccess({
+        allowedRoles: ["ADMIN", "SUPER_ADMIN"],
+        redirectTo: "index.html",
+    });
+    if (!account) {
         return false;
     }
-    const account = await response.json();
     currentAccountRole = account.role;
     document.getElementById("submission-management").hidden =
         account.role !== "SUPER_ADMIN";
-    if (account.role !== "ADMIN" && account.role !== "SUPER_ADMIN") {
-        window.location.replace("index.html");
-        return false;
-    }
     return true;
 }
 
 function setMessage(key, text, isError = false) {
     messages[key].textContent = text;
-    messages[key].style.color = isError ? "#b42318" : "#1d7a5d";
+    messages[key].classList.toggle("error", isError);
+    messages[key].classList.toggle("success", !isError && Boolean(text));
 }
 
 function escapeHtml(value) {
@@ -64,6 +62,31 @@ function escapeHtml(value) {
         "'": "&#39;",
     })[character]);
 }
+
+function bindSidebarNavigation() {
+    document.querySelectorAll(".nav-item").forEach((navItem) => {
+        navItem.addEventListener("click", (event) => {
+            const targetId = navItem.getAttribute("href");
+            if (!targetId || targetId === "#") {
+                document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+                navItem.classList.add("active");
+                return;
+            }
+
+            const target = document.querySelector(targetId);
+            if (!target) {
+                return;
+            }
+
+            event.preventDefault();
+            document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item === navItem));
+            target.scrollIntoView({ behavior: "smooth", block: "start" });
+            history.replaceState(null, "", targetId);
+        });
+    });
+}
+
+bindSidebarNavigation();
 
 function addTestcaseRow(editor) {
     const row = document.createElement("div");
@@ -635,12 +658,22 @@ document.querySelectorAll(".testcase-editor > div").forEach((editor) => {
 
 addTestcaseRow(document.getElementById("problem-testcases"));
 
-document.getElementById("logout-button").addEventListener("click", async () => {
-    const response = await apiFetch("/auth/logout", { method: "POST" });
-    if (response.ok) {
-        window.location.replace("login.html");
-    }
-});
+const logoutButton = document.getElementById("logout-button");
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        try {
+            const response = await apiFetch("/auth/logout", { method: "POST" });
+            if (response.ok) {
+                window.location.replace("login.html");
+                return;
+            }
+            throw new Error(`Không thể đăng xuất (${response.status}).`);
+        } catch (error) {
+            console.error(error);
+            setMessage("classDetail", error instanceof Error ? error.message : "Không thể đăng xuất.", true);
+        }
+    });
+}
 
 async function init() {
     if (!(await ensureAdminAccess())) {

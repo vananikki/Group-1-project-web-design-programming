@@ -29,7 +29,7 @@ The project is now extended beyond the original account-management layer. The ve
 - standings endpoint for contest performance tracking and out-of-contest interpretation
 - Judge0-backed submission grading with stored verdict, score, testcase counts, runtime, and memory
 - paginated server-wide submission history and class-scoped submission history
-- reusable submission-history page filterable by problem and account IDs
+- reusable submission-history page searchable by problem and account names
 - static frontend pages for authentication, account, problem practice/submission, classes, and administration
 
 The codebase also includes phase-based database model files for future expansion:
@@ -83,7 +83,7 @@ The current backend is responsible for:
 
 Authenticated users can view a paginated server-wide submission feed, including private-problem submission statuses. Source code is only returned by an ownership-checked endpoint for the submitter. Class submission history is scoped to submissions made through that class and is visible only to enrolled students.
 
-Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. They can also practice public problems without joining a class. The problem bank links to a dedicated two-column submission page: statement on the left and code editor on the right. Submission history has its own page, filterable with `problem_id` and/or `account_id` query parameters; when filtered, the matching results and a separate unfiltered server-wide feed are shown side by side on wide screens. On smaller screens the cards stack vertically.
+Students use the classroom page to discover classes, request to join, view assigned problems, and submit source code. They can also practice public problems without joining a class. The problem bank links to a dedicated two-column submission page: statement on the left and code editor on the right. Submission history has its own page with a compact filter column for partial problem-name and submitter-name searches; the submission list takes about two-thirds of the desktop layout and stacks below the filters on narrow screens. Existing links may continue to use problem or account IDs.
 
 Administrators create problems in their own library from a separate editor; only the owner (or a super admin) can view and edit a problem's test cases. Public problems appear in the shared practice library, while private problems are only visible to students through classes where they have been assigned. Class administrators approve enrollment requests and manage class-specific administrator permissions. Class owners can search active administrator accounts by name or email and invite them to a class. Class ownership reuses the existing `manage_class` relation; the first administrator assigned to a class is its owner. Only administrators assigned to a class can access it, and only its owner (the primary administrator) can review student join requests. Requests remain pending until the owner approves or rejects them. A new `class_join_request` table records approval requests. Submissions are executed by the configured Judge0 service, never by the web server.
 
@@ -114,6 +114,7 @@ To enable code submissions, run a Judge0 instance, set `JUDGE0_URL` in the backe
 ### 2) Frontend
 
 The key frontend routes and query parameters are documented in [app.md](./app.md).
+For backend deployment, public-access setup, ngrok, and CORS guidance, see [backend.md](./backend.md).
 
 ```bash
 cd frontend
@@ -124,6 +125,8 @@ Open the app at:
 
 - Backend: `http://localhost:8000`
 - Frontend: `http://localhost:5500`
+
+For public access via ngrok while keeping the backend local, use the setup in [backend.md](./backend.md). The important rule is: the frontend may be public, but the API should still be served locally unless you intentionally expose it separately.
 
 Both servers listen on IPv4 and IPv6 so other devices can connect through the machine's LAN or Tailscale addresses.
 
@@ -338,7 +341,7 @@ The main backend routes currently cover:
 | `POST` | `/auth/logout` | Delete the current session |
 | `GET` | `/admin/accounts` | List accounts for a super admin |
 | `PATCH` | `/admin/accounts/{account_id}/role` | Change a user's role |
-| `GET` | `/admin/judge/problems` | List problems |
+| `GET` | `/admin/judge/problems` | List problems; optional `q` searches visible problem names |
 | `GET` | `/admin/judge/problems/{problem_id}` | View an owned problem and its test cases |
 | `POST` | `/admin/judge/problems` | Create a problem with optional test cases |
 | `PATCH` | `/admin/judge/problems/{problem_id}` | Edit a problem and optionally replace its test cases |
@@ -358,23 +361,24 @@ The main backend routes currently cover:
 | `POST` | `/admin/judge/contests/{contest_id}/problems` | Add a problem to a contest |
 | `POST` | `/admin/judge/academic-classes/{class_id}/contests` | Attach a contest to a class |
 | `GET` | `/student/available-classes` | List classes and the student's access status |
-| `GET` | `/student/problems` | List public problems for practice |
+| `GET` | `/student/problems` | List/search public problems by name with optional `q` |
 | `POST` | `/student/problems/{problem_id}/submissions` | Submit a solution to a public problem |
 | `GET` | `/student/classes` | List classes the student has joined |
 | `POST` | `/student/classes/{class_id}/join-requests` | Request access to a class |
 | `GET` | `/student/classes/{class_id}` | View class problems and contests after approval |
 | `GET` | `/student/classes/{class_id}/contests/{contest_id}` | View contest problems and eligibility window |
 | `GET` | `/student/classes/{class_id}/contests/{contest_id}/standings` | View live standings |
-| `GET` | `/student/submissions` | View paginated server-wide statuses; supports `problem_id` and `account_id` filters; source code is omitted |
+| `GET` | `/student/submissions` | View paginated server-wide statuses; supports name and ID filters; source code is omitted |
 | `GET` | `/student/submissions/{submission_id}/source` | View source code only when the caller owns the submission |
 | `GET` | `/student/classes/{class_id}/submissions` | View paginated submissions made in a joined class |
 | `GET` | `/student/languages` | List configured Judge0 languages |
 | `POST` | `/student/classes/{class_id}/problems/{problem_id}/submissions` | Submit source code to Judge0 and save the result |
 
-The reusable submission-history page is `frontend/modules/submissions.html`. Its query
-parameters are `problem_id` and `account_id`; either or both can be supplied. The page
-also keeps a separate, unfiltered server-wide history card. The UI flow and examples are
-in [app.md](./app.md).
+The reusable submission-history page is `frontend/modules/submissions.html`. Its
+`problem_name` and `account_name` query parameters perform partial, case-insensitive
+searches; the API also retains `problem_id` and `account_id` for existing links. The
+page shows the matching history (or the latest server-wide submissions without filters)
+beside a compact filter column. The UI flow and examples are in [app.md](./app.md).
 
 ---
 

@@ -1,4 +1,4 @@
-import { apiFetch, readResponse } from "./api.js?v=20261029a";
+import { apiFetch, readResponse, requireAccountAccess } from "./api.js?v=20261029a";
 
 const statusMessage = document.getElementById("status-message");
 const accountsTable = document.getElementById("accounts-table");
@@ -7,18 +7,11 @@ const roles = ["USER", "ADMIN", "SUPER_ADMIN"];
 
 async function loadAccounts() {
     try {
-        const meResponse = await apiFetch("/auth/me");
-        if (meResponse.status === 401) {
-            window.location.replace("login.html");
-            return;
-        }
-        if (!meResponse.ok) {
-            throw new Error(`Session check failed (${meResponse.status})`);
-        }
-
-        const currentAccount = await meResponse.json();
-        if (currentAccount.role !== "SUPER_ADMIN") {
-            window.location.replace("index.html");
+        const currentAccount = await requireAccountAccess({
+            allowedRoles: ["SUPER_ADMIN"],
+            redirectTo: "index.html",
+        });
+        if (!currentAccount) {
             return;
         }
 
@@ -179,6 +172,26 @@ async function deleteAccount(account, deleteButton) {
         statusMessage.textContent = error.message || "Không thể xóa tài khoản";
         deleteButton.disabled = false;
     }
+}
+
+const logoutButton = document.getElementById("logout-button");
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        logoutButton.disabled = true;
+        statusMessage.textContent = "";
+        try {
+            const response = await apiFetch("/auth/logout", { method: "POST" });
+            if (!response.ok) {
+                throw new Error(`Không thể đăng xuất (${response.status}).`);
+            }
+            window.location.replace("login.html");
+        } catch (error) {
+            console.error(error);
+            statusMessage.textContent =
+                error instanceof Error ? error.message : "Không thể đăng xuất.";
+            logoutButton.disabled = false;
+        }
+    });
 }
 
 loadAccounts();

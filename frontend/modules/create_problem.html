@@ -14,8 +14,10 @@
                 <span>Online Judge</span>
             </a>
             <div class="button-row">
+                <a href="index.html">Tài khoản</a>
+                <a href="classroom_list.html">Lớp học</a>
                 <a href="problems.html">Kho bài tập</a>
-                <a href="classroom.html">Lớp học</a>
+                <a href="submissions.html">Lịch sử bài nộp</a>
                 <button id="logout-button" class="secondary" type="button">Đăng xuất</button>
             </div>
         </header>
@@ -50,6 +52,7 @@
                     <select name="access_modifier" required>
                         <option value="private">Private — chỉ trong lớp được thêm</option>
                         <option value="public">Public — mọi người có thể luyện tập</option>
+                        <option value="hidden">Hidden — ẩn hoàn toàn, dùng cho contest</option>
                     </select>
                 </label>
                 <p class="field-hint">Sau khi tạo, bạn có thể gắn bài vào một hoặc nhiều lớp từ trang quản lý lớp.</p>
@@ -101,6 +104,6 @@
             <p id="page-message" class="message" role="alert"></p>
         </section>
     </main>
-    <script type="module" src="../assets/js/create_problem.js?v=20261101i"></script>
+    <script type="module" src="../assets/js/create_problem.js?v=20261102a"></script>
 </body>
 </html>

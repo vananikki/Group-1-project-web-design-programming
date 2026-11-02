@@ -46,7 +46,7 @@ function getSourceDialog() {
     return dialog;
 }
 
-async function showOwnSource(submissionId, problemName) {
+async function showSubmissionSource(submissionId, problemName, sourcePath) {
     const dialog = getSourceDialog();
     const heading = dialog.querySelector("#submission-source-heading");
     const message = dialog.querySelector('[role="status"]');
@@ -58,7 +58,7 @@ async function showOwnSource(submissionId, problemName) {
     dialog.showModal();
 
     try {
-        const response = await apiFetch(`/student/submissions/${submissionId}/source`);
+        const response = await apiFetch(sourcePath);
         const data = await readResponse(response);
         if (!response.ok) {
             throw new Error(data.detail || `Không thể tải mã nguồn (${response.status})`);
@@ -75,7 +75,11 @@ async function showOwnSource(submissionId, problemName) {
 export function renderSubmissionHistory(
     list,
     submissions,
-    { append = false, emptyText = "Chưa có bài nộp nào." } = {},
+    {
+        append = false,
+        emptyText = "Chưa có bài nộp nào.",
+        sourceUrlForSubmission = null,
+    } = {},
 ) {
     if (!append) {
         list.replaceChildren();
@@ -93,7 +97,9 @@ export function renderSubmissionHistory(
                 ? "Private"
                 : submission.access_modifier === "public"
                     ? "Public"
-                    : "",
+                    : submission.access_modifier === "hidden"
+                        ? "Hidden"
+                        : "",
             submission.contest_name || "",
             `${submission.passed_testcases ?? "—"}/${submission.total_testcases ?? "—"} test`,
             `tổng ${submission.runtime_ms == null ? "—" : `${submission.runtime_ms} ms`}`,
@@ -107,16 +113,25 @@ export function renderSubmissionHistory(
             summary,
             "span",
             submission.status,
-            `status-pill${submission.status === "Accepted" ? "" : " pending"}`,
+            `status-pill${submission.status === "Accepted" ? "" : " failed"}`,
         );
         appendText(summary, "strong", `${submission.score ?? 0} điểm`);
-        if (submission.is_mine) {
+        if (submission.is_mine || sourceUrlForSubmission) {
             const sourceButton = document.createElement("button");
             sourceButton.type = "button";
             sourceButton.className = "secondary";
-            sourceButton.textContent = "Xem mã của tôi";
+            sourceButton.textContent = submission.is_mine && !sourceUrlForSubmission
+                ? "Xem mã của tôi"
+                : "Xem mã nguồn";
             sourceButton.addEventListener("click", () => {
-                showOwnSource(submission.submission_id, submission.problem_name);
+                const sourcePath = sourceUrlForSubmission
+                    ? sourceUrlForSubmission(submission)
+                    : `/student/submissions/${submission.submission_id}/source`;
+                showSubmissionSource(
+                    submission.submission_id,
+                    submission.problem_name,
+                    sourcePath,
+                );
             });
             summary.append(sourceButton);
         }
