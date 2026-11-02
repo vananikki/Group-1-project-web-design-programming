@@ -30,7 +30,7 @@ python3 -m http.server 5500 --bind 0.0.0.0 --directory frontend
 ```
 
 Mở `http://localhost:5500`. API mặc định ở `http://localhost:8000`; tài liệu
-OpenAPI tại `/docs`. Hướng dẫn cấu hình, truy cập LAN/ngrok và kiểm thử nằm
+OpenAPI tại `/docs`. Hướng dẫn cấu hình, truy cập LAN và kiểm thử nằm
 trong [backend.md](./backend.md).
 
 > Migration judge xóa bảng cũ `solution` và dữ liệu trong bảng đó. Chi tiết

@@ -169,12 +169,6 @@ origin frontend vào `CORS_ORIGINS` khi cần. Dùng `127.0.0.1` để chỉ bin
 local; dùng `0.0.0.0` để thiết bị khác trong mạng truy cập được, đồng thời
 cấu hình firewall phù hợp.
 
-Có thể public frontend qua ngrok mà backend vẫn chạy local:
-
-```bash
-ngrok http --domain=<your-domain> 5500
-```
-
 Trình duyệt của người dùng vẫn cần truy cập được backend trên máy chủ. CORS
 không làm backend local tự khả dụng từ Internet; không public API nếu chưa
 có cấu hình bảo vệ phù hợp. Hướng dẫn UI và luồng thao tác ở [app.md](./app.md).
