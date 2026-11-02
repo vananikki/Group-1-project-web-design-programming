@@ -165,6 +165,25 @@ class Account(Base):
             self.set_password(raw_password)
 
         return True
+
+    @property
+    def is_user(self) -> bool:
+        return self.role in {
+            AccountRole.USER,
+            AccountRole.ADMIN,
+            AccountRole.SUPER_ADMIN,
+        }
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role in {
+            AccountRole.ADMIN,
+            AccountRole.SUPER_ADMIN,
+        }
+
+    @property
+    def is_super_admin(self) -> bool:
+        return self.role == AccountRole.SUPER_ADMIN
     
 
 

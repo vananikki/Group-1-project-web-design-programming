@@ -135,7 +135,7 @@ def _metric_as_int(value: Decimal | None) -> int | None:
 
 def _require_admin_account(session_id: str | None, session: Session) -> Account:
     account = _require_authenticated_account(session_id, session)
-    if account.role not in {AccountRole.ADMIN, AccountRole.SUPER_ADMIN}:
+    if not account.is_admin:
         raise HTTPException(status_code=403, detail="Bạn không có quyền quản lý judge")
 
     admin = session.scalar(select(Admin).where(Admin.account_id == account.account_id))
@@ -169,7 +169,7 @@ def _require_authenticated_account(session_id: str | None, session: Session) -> 
 
 def _require_student_account(session_id: str | None, session: Session) -> Account:
     account = _require_authenticated_account(session_id, session)
-    if account.role not in {AccountRole.USER, AccountRole.ADMIN, AccountRole.SUPER_ADMIN}:
+    if not account.is_user:
         raise HTTPException(status_code=403, detail="Chức năng này dành cho học viên hoặc quản trị viên được mời vào lớp")
     return account
 
@@ -191,7 +191,7 @@ def _require_class_manager(
 ) -> bool:
     if session.get(AcademicClass, class_id) is None:
         raise HTTPException(status_code=404, detail="Academic class không tồn tại")
-    if account.role == AccountRole.SUPER_ADMIN:
+    if account.is_super_admin:
         return _class_owner_account_id(class_id, session) == account.account_id
 
     admin = session.scalar(select(Admin).where(Admin.account_id == account.account_id))

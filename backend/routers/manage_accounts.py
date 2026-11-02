@@ -39,7 +39,7 @@ def get_super_admin(
     account = session.get(Account, user_session.account_id)
     if account is None:
         raise HTTPException(status_code=401, detail="Tài khoản không tồn tại")
-    if account.role != AccountRole.SUPER_ADMIN:
+    if not account.is_super_admin:
         raise HTTPException(status_code=403, detail="Không có quyền quản lý tài khoản")
 
     return account
@@ -112,7 +112,7 @@ def update_account_role(
             detail="Không thể tự hạ quyền super admin",
         )
 
-    if account.role == AccountRole.SUPER_ADMIN and data.role != AccountRole.SUPER_ADMIN:
+    if account.is_super_admin and data.role != AccountRole.SUPER_ADMIN:
         super_admin_count = session.scalar(
             select(func.count())
             .select_from(Account)
@@ -168,8 +168,8 @@ def delete_account(
             detail="Không thể tự xóa tài khoản của mình",
         )
 
-    if acting_account.role == AccountRole.SUPER_ADMIN:
-        if target_account.role == AccountRole.SUPER_ADMIN:
+    if acting_account.is_super_admin:
+        if target_account.is_super_admin:
             super_admin_count = session.scalar(
                 select(func.count())
                 .select_from(Account)
