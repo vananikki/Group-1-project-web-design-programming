@@ -208,6 +208,46 @@ def _require_class_manager(
     return _class_owner_account_id(class_id, session) == account.account_id
 
 
+def _is_class_manager(account: Account, class_id: int, session: Session) -> bool:
+    if not account.is_admin:
+        return False
+    if account.is_super_admin:
+        return _class_owner_account_id(class_id, session) == account.account_id
+    return session.scalar(
+        select(ManageClass.manage_id)
+        .join(Admin, Admin.admin_id == ManageClass.admin_id)
+        .where(
+            ManageClass.class_id == class_id,
+            Admin.account_id == account.account_id,
+        )
+    ) is not None
+
+
+def _require_class_contest_viewer(
+    account: Account,
+    class_id: int,
+    contest_id: int,
+    session: Session,
+) -> bool:
+    if session.get(AcademicClassContest, (class_id, contest_id)) is None:
+        raise HTTPException(status_code=404, detail="Cuộc thi không thuộc lớp này")
+
+    student = session.scalar(select(Student).where(Student.account_id == account.account_id))
+    is_class_member = student is not None and session.scalar(
+        select(StudentClass.student_id).where(
+            StudentClass.class_id == class_id,
+            StudentClass.student_id == student.student_id,
+        )
+    ) is not None
+    if is_class_member or _is_class_manager(account, class_id, session):
+        return is_class_member
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn chưa tham gia hoặc được phân công quản lý lớp này",
+        )
+
+
 def _require_class_owner(
     account: Account,
     class_id: int,
@@ -281,6 +321,16 @@ def _contest_status(contest: Contest) -> str:
     if now <= end_time:
         return "active"
     return "finished"
+
+
+def _require_active_contest(contest: Contest) -> None:
+    status = _contest_status(contest)
+    if status != "active":
+        if status == "upcoming":
+            detail = "Cuộc thi chưa bắt đầu"
+        else:
+            detail = "Cuộc thi đã kết thúc"
+        raise HTTPException(status_code=409, detail=detail)
 
 
 def _contest_hidden_problem_visible_to_student(
@@ -656,6 +706,7 @@ def get_academic_class_detail(
             "account_id": item.student.account_id,
             "account_name": item.student.account.account_name,
             "account_email": item.student.account.account_email,
+            "account_role": item.student.account.role.value,
         }
         for item in sorted(academic_class.student_classes, key=lambda x: x.student_id)
     ]
@@ -1022,16 +1073,9 @@ def get_student_contest(
     session: Session = Depends(get_session),
 ):
     account = _require_student_account(session_id, session)
-    student = session.scalar(select(Student).where(Student.account_id == account.account_id))
-    if student is None or session.scalar(
-        select(StudentClass).where(
-            StudentClass.class_id == class_id,
-            StudentClass.student_id == student.student_id,
-        )
-    ) is None:
-        raise HTTPException(status_code=403, detail="Bạn chưa tham gia lớp này")
-    if session.get(AcademicClassContest, (class_id, contest_id)) is None:
-        raise HTTPException(status_code=404, detail="Cuộc thi không thuộc lớp này")
+    is_class_member = _require_class_contest_viewer(
+        account, class_id, contest_id, session
+    )
     contest = session.scalar(
         select(Contest)
         .options(
@@ -1041,13 +1085,16 @@ def get_student_contest(
     )
     if contest is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc thi")
+    _require_active_contest(contest)
     status = _contest_status(contest)
     now = datetime.now(timezone.utc)
+    can_view_all_submissions = _is_class_manager(account, class_id, session)
     visible_problems = []
     for item in contest.contest_problems:
         if (
             item.problem.access_modifier == AccessModifier.HIDDEN
             and item.problem.created_by != account.account_id
+            and is_class_member
             and not _contest_hidden_problem_visible_to_student(
                 session,
                 account,
@@ -1087,7 +1134,8 @@ def get_student_contest(
         "start_time": _as_utc(contest.start_time).isoformat(),
         "end_time": _as_utc(contest.end_time).isoformat(),
         "status": status,
-        "can_submit": status == "active",
+        "can_submit": status == "active" and is_class_member,
+        "can_view_all_submissions": can_view_all_submissions,
         "problems": visible_problems,
         "server_time": now.isoformat(),
     }
@@ -1101,19 +1149,38 @@ def get_student_contest_standings(
     session: Session = Depends(get_session),
 ):
     account = _require_student_account(session_id, session)
-    student = session.scalar(select(Student).where(Student.account_id == account.account_id))
-    if student is None or session.scalar(
-        select(StudentClass).where(
-            StudentClass.class_id == class_id,
-            StudentClass.student_id == student.student_id,
-        )
-    ) is None:
-        raise HTTPException(status_code=403, detail="Bạn chưa tham gia lớp này")
-    if session.get(AcademicClassContest, (class_id, contest_id)) is None:
-        raise HTTPException(status_code=404, detail="Cuộc thi không thuộc lớp này")
+    _require_class_contest_viewer(account, class_id, contest_id, session)
     contest = session.get(Contest, contest_id)
     if contest is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc thi")
+    _require_active_contest(contest)
+
+    contest_problem_rows = session.execute(
+        select(
+            ContestProblem.problem_id,
+            ContestProblem.problem_order,
+            Problem.problem_name,
+            func.coalesce(func.sum(Testcase.point), 0).label("max_score"),
+        )
+        .join(Problem, Problem.problem_id == ContestProblem.problem_id)
+        .outerjoin(Testcase, Testcase.problem_id == ContestProblem.problem_id)
+        .where(ContestProblem.contest_id == contest_id)
+        .group_by(
+            ContestProblem.problem_id,
+            ContestProblem.problem_order,
+            Problem.problem_name,
+        )
+        .order_by(ContestProblem.problem_order, ContestProblem.problem_id)
+    ).all()
+    contest_problems = [
+        {
+            "problem_id": problem_id,
+            "problem_order": problem_order,
+            "problem_name": problem_name,
+            "max_score": max_score,
+        }
+        for problem_id, problem_order, problem_name, max_score in contest_problem_rows
+    ]
 
     rows = session.execute(
         select(Submission.account_id, Account.account_name, Submission.problem_id,
@@ -1132,20 +1199,44 @@ def get_student_contest_standings(
                 "solved": 0,
                 "score": 0,
                 "penalty": 0,
-                "problems": {},
+                "problems": {
+                    item["problem_id"]: {
+                        "attempts": 0,
+                        "solved": False,
+                        "score": 0,
+                        "max_score": item["max_score"],
+                    }
+                    for item in contest_problems
+                },
             },
         )
         problem_score = participant["problems"].setdefault(
-            problem_id, {"attempts": 0, "solved": False, "score": 0}
+            problem_id,
+            {"attempts": 0, "solved": False, "score": 0, "max_score": 0},
         )
         if not problem_score["solved"]:
             problem_score["attempts"] += 1
+        problem_score["score"] = max(problem_score["score"], score or 0)
         if status == "Accepted" and not problem_score["solved"]:
             problem_score["solved"] = True
-            problem_score["score"] = score or 0
-            participant["solved"] += 1
-            participant["score"] += score or 0
             participant["penalty"] += problem_score["attempts"] - 1
+
+    for participant in standings.values():
+        participant["solved"] = sum(
+            int(problem["solved"]) for problem in participant["problems"].values()
+        )
+        participant["score"] = sum(
+            problem["score"] for problem in participant["problems"].values()
+        )
+        participant["problems"] = [
+            {
+                "problem_id": item["problem_id"],
+                "problem_order": item["problem_order"],
+                "problem_name": item["problem_name"],
+                **participant["problems"][item["problem_id"]],
+            }
+            for item in contest_problems
+        ]
 
     result = sorted(
         standings.values(),
@@ -1157,6 +1248,7 @@ def get_student_contest_standings(
     return {
         "contest_id": contest_id,
         "contest_name": contest.contest_name,
+        "problems": contest_problems,
         "standings": result,
     }
 
@@ -1166,18 +1258,32 @@ def list_student_submissions(
     class_id: int,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    contest_id: int | None = Query(default=None, ge=1),
     session_id: str | None = Cookie(default=None),
     session: Session = Depends(get_session),
 ):
     account = _require_student_account(session_id, session)
-    student = session.scalar(select(Student).where(Student.account_id == account.account_id))
-    if student is None or session.scalar(
-        select(StudentClass).where(
-            StudentClass.class_id == class_id,
-            StudentClass.student_id == student.student_id,
-        )
-    ) is None:
-        raise HTTPException(status_code=403, detail="Bạn chưa tham gia lớp này")
+    if contest_id is not None:
+        _require_class_contest_viewer(account, class_id, contest_id, session)
+    else:
+        student = session.scalar(select(Student).where(Student.account_id == account.account_id))
+        if student is None or session.scalar(
+            select(StudentClass).where(
+                StudentClass.class_id == class_id,
+                StudentClass.student_id == student.student_id,
+            )
+        ) is None:
+            raise HTTPException(status_code=403, detail="Bạn chưa tham gia lớp này")
+    if contest_id is not None:
+        contest = session.get(Contest, contest_id)
+        if contest is None:
+            raise HTTPException(status_code=404, detail="Không tìm thấy cuộc thi")
+        _require_active_contest(contest)
+    submission_filters = [Submission.class_id == class_id]
+    if contest_id is not None:
+        submission_filters.append(Submission.contest_id == contest_id)
+    else:
+        submission_filters.append(Submission.contest_id.is_(None))
     rows = session.execute(
         select(
             Submission,
@@ -1188,7 +1294,7 @@ def list_student_submissions(
         .join(Problem, Problem.problem_id == Submission.problem_id)
         .outerjoin(Contest, Contest.contest_id == Submission.contest_id)
         .outerjoin(Account, Account.account_id == Submission.account_id)
-        .where(Submission.class_id == class_id)
+        .where(*submission_filters)
         .order_by(Submission.submitted_at.desc(), Submission.submission_id.desc())
         .limit(limit)
         .offset(offset)
@@ -1484,10 +1590,17 @@ def get_own_submission_source(
     submission = session.get(Submission, submission_id)
     if submission is None or submission.account_id != account.account_id:
         raise HTTPException(status_code=404, detail="Không tìm thấy bài nộp")
+    return {
+        "submission_id": submission.submission_id,
+        "source_code": _decode_submission_source(submission),
+    }
+
+
+def _decode_submission_source(submission: Submission) -> str:
     if not submission.source_code:
         raise HTTPException(status_code=404, detail="Bài nộp không có mã nguồn")
     try:
-        source_code = (
+        return (
             base64.b64decode(submission.source_code, validate=True).decode("utf-8")
             if submission.source_code_encoded
             else submission.source_code
@@ -1497,7 +1610,40 @@ def get_own_submission_source(
             status_code=500,
             detail="Không thể giải mã mã nguồn của bài nộp",
         ) from exc
-    return {"submission_id": submission.submission_id, "source_code": source_code}
+
+
+@student_router.get(
+    "/classes/{class_id}/contests/{contest_id}/submissions/{submission_id}/source"
+)
+def get_class_manager_contest_submission_source(
+    class_id: int,
+    contest_id: int,
+    submission_id: int,
+    session_id: str | None = Cookie(default=None),
+    session: Session = Depends(get_session),
+):
+    account = _require_student_account(session_id, session)
+    _require_class_contest_viewer(account, class_id, contest_id, session)
+    if not _is_class_manager(account, class_id, session):
+        raise HTTPException(status_code=403, detail="Chỉ quản trị viên lớp mới được xem mã bài nộp")
+
+    contest = session.get(Contest, contest_id)
+    if contest is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc thi")
+    _require_active_contest(contest)
+    submission = session.scalar(
+        select(Submission).where(
+            Submission.submission_id == submission_id,
+            Submission.class_id == class_id,
+            Submission.contest_id == contest_id,
+        )
+    )
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài nộp trong cuộc thi")
+    return {
+        "submission_id": submission.submission_id,
+        "source_code": _decode_submission_source(submission),
+    }
 
 
 @student_router.get("/problems/{problem_id}")
@@ -1685,9 +1831,13 @@ def list_available_class_students(
         raise HTTPException(status_code=422, detail="Nhập ít nhất 2 ký tự để tìm thành viên")
 
     assigned_students = (
-        select(Student.student_id)
-        .join(StudentClass, StudentClass.student_id == Student.student_id)
-        .where(StudentClass.class_id == class_id, Student.account_id == Account.account_id)
+        select(StudentClass.student_id)
+        .join(Student, Student.student_id == StudentClass.student_id)
+        .where(
+            StudentClass.class_id == class_id,
+            Student.account_id == Account.account_id,
+        )
+        .correlate(Account)
     )
     candidates = session.scalars(
         select(Account)

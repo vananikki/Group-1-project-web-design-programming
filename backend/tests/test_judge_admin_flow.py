@@ -713,7 +713,7 @@ def test_problem_ownership_and_public_practice_are_enforced(monkeypatch):
     assert "input_data" not in public_submission.json()["testcases"][0]
 
 
-def test_hidden_contest_problem_is_invisible_to_students_until_contest_is_active():
+def test_hidden_contest_problem_is_only_visible_during_active_contest():
     owner_id = _create_account("hidden-owner@example.com", AccountRole.ADMIN)
     student_id = _create_account("hidden-student@example.com", AccountRole.USER)
     _set_session(owner_id, "hidden-owner-session")
@@ -781,8 +781,20 @@ def test_hidden_contest_problem_is_invisible_to_students_until_contest_is_active
         f"/student/classes/{class_id}/contests/{contest_id}",
         cookies={"session_id": "hidden-student-session"},
     )
+    assert contest_detail.status_code == 409
+    with TestingSessionLocal() as db:
+        contest = db.get(Contest, contest_id)
+        contest.start_time = now - timedelta(minutes=5)
+        contest.end_time = now + timedelta(minutes=30)
+        db.commit()
+    contest_detail = client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}",
+        cookies={"session_id": "hidden-student-session"},
+    )
     assert contest_detail.status_code == 200, contest_detail.text
-    assert contest_detail.json()["problems"] == []
+    assert [
+        item["problem_id"] for item in contest_detail.json()["problems"]
+    ] == [problem_id]
 
     owner_detail = client.get(
         f"/admin/judge/problems/{problem_id}",
@@ -790,6 +802,69 @@ def test_hidden_contest_problem_is_invisible_to_students_until_contest_is_active
     )
     assert owner_detail.status_code == 200, owner_detail.text
     assert owner_detail.json()["access_modifier"] == "hidden"
+
+
+def test_class_contest_preserves_selected_problem_order():
+    admin_id = _create_account("ordered-contest-admin@example.com", AccountRole.ADMIN)
+    student_id = _create_account("ordered-contest-student@example.com", AccountRole.USER)
+    _set_session(admin_id, "ordered-contest-admin-session")
+    _set_session(student_id, "ordered-contest-student-session")
+    client = TestClient(app)
+    cookies = {"session_id": "ordered-contest-admin-session"}
+
+    class_response = client.post(
+        "/admin/judge/academic-classes",
+        json={"class_name": "Ordered contest class"},
+        cookies=cookies,
+    )
+    assert class_response.status_code == 200, class_response.text
+    class_id = class_response.json()["class_id"]
+
+    problem_ids = []
+    for problem_name in ("First added", "Second added"):
+        problem_response = client.post(
+            f"/admin/judge/academic-classes/{class_id}/problems/create",
+            json={
+                "problem_name": problem_name,
+                "time_limit": 1,
+                "memory_limit": 256,
+                "access_modifier": "public",
+            },
+            cookies=cookies,
+        )
+        assert problem_response.status_code == 200, problem_response.text
+        problem_ids.append(problem_response.json()["problem_id"])
+
+    invite_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/students",
+        json={"account_id": student_id},
+        cookies=cookies,
+    )
+    assert invite_response.status_code == 200, invite_response.text
+
+    now = datetime.now(timezone.utc)
+    contest_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/contests/create",
+        json={
+            "contest_name": "Ordered contest",
+            "start_time": (now - timedelta(minutes=30)).isoformat(),
+            "end_time": (now + timedelta(minutes=90)).isoformat(),
+            "problem_ids": list(reversed(problem_ids)),
+        },
+        cookies=cookies,
+    )
+    assert contest_response.status_code == 200, contest_response.text
+    contest_id = contest_response.json()["contest_id"]
+
+    detail_response = client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}",
+        cookies={"session_id": "ordered-contest-student-session"},
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    assert [
+        (item["problem_id"], item["problem_order"])
+        for item in detail_response.json()["problems"]
+    ] == [(problem_ids[1], 1), (problem_ids[0], 2)]
 
 
 def test_submission_history_includes_private_and_public_with_each_status(monkeypatch):
@@ -1251,6 +1326,11 @@ def test_class_managers_attach_existing_owned_or_public_problems():
 def test_admin_can_manage_class_students_without_schema_changes():
     admin_id = _create_account("class-admin@example.com", AccountRole.ADMIN)
     student_account_id = _create_account("class-student@example.com", AccountRole.USER)
+    searchable_account_id = _create_account(
+        "searchable-member@example.com",
+        AccountRole.USER,
+        name="Searchable Member",
+    )
     _set_session(admin_id, "class-session")
     client = TestClient(app)
 
@@ -1261,6 +1341,15 @@ def test_admin_can_manage_class_students_without_schema_changes():
     )
     assert class_response.status_code == 200, class_response.text
     class_id = class_response.json()["class_id"]
+
+    search_response = client.get(
+        f"/admin/judge/academic-classes/{class_id}/available-students?search=Searchable",
+        cookies={"session_id": "class-session"},
+    )
+    assert search_response.status_code == 200, search_response.text
+    assert searchable_account_id in [
+        item["account_id"] for item in search_response.json()
+    ]
 
     add_response = client.post(
         f"/admin/judge/academic-classes/{class_id}/students",
@@ -1275,6 +1364,14 @@ def test_admin_can_manage_class_students_without_schema_changes():
     )
     assert detail_response.status_code == 200, detail_response.text
     assert detail_response.json()["students"][0]["account_id"] == student_account_id
+    assert detail_response.json()["students"][0]["account_role"] == "USER"
+    assert student_account_id not in [
+        item["account_id"]
+        for item in client.get(
+            f"/admin/judge/academic-classes/{class_id}/available-students?search=class",
+            cookies={"session_id": "class-session"},
+        ).json()
+    ]
 
     remove_response = client.delete(
         f"/admin/judge/academic-classes/{class_id}/students/{student_account_id}",
@@ -1305,12 +1402,27 @@ def test_admin_can_be_invited_as_student_member_without_management_rights():
     )
     assert invite_response.status_code == 200, invite_response.text
 
+    owner_detail = client.get(
+        f"/admin/judge/academic-classes/{class_id}",
+        cookies={"session_id": "owner-member-session"},
+    )
+    assert owner_detail.status_code == 200, owner_detail.text
+    assert owner_detail.json()["students"][0]["account_role"] == "ADMIN"
+
     member_class_list = client.get(
         "/student/classes",
         cookies={"session_id": "member-admin-session"},
     )
     assert member_class_list.status_code == 200, member_class_list.text
     assert any(item["class_id"] == class_id for item in member_class_list.json())
+    available_classes = client.get(
+        "/student/available-classes",
+        cookies={"session_id": "member-admin-session"},
+    )
+    assert available_classes.status_code == 200, available_classes.text
+    assert next(
+        item for item in available_classes.json() if item["class_id"] == class_id
+    )["membership_status"] == "joined"
 
     member_detail = client.get(
         f"/student/classes/{class_id}",
@@ -1323,6 +1435,128 @@ def test_admin_can_be_invited_as_student_member_without_management_rights():
         cookies={"session_id": "member-admin-session"},
     )
     assert admin_detail.status_code == 403, admin_detail.text
+
+
+def test_class_manager_can_view_active_contest_without_student_membership():
+    admin_id = _create_account("contest-view-manager@example.com", AccountRole.ADMIN)
+    outsider_id = _create_account("contest-view-outsider@example.com", AccountRole.USER)
+    contestant_id = _create_account("contest-view-contestant@example.com", AccountRole.USER)
+    _set_session(admin_id, "contest-view-manager-session")
+    _set_session(outsider_id, "contest-view-outsider-session")
+    _set_session(contestant_id, "contest-view-contestant-session")
+    client = TestClient(app)
+    admin_cookies = {"session_id": "contest-view-manager-session"}
+
+    class_response = client.post(
+        "/admin/judge/academic-classes",
+        json={"class_name": "Contest observer class"},
+        cookies=admin_cookies,
+    )
+    assert class_response.status_code == 200, class_response.text
+    class_id = class_response.json()["class_id"]
+    problem_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/problems/create",
+        json={
+            "problem_name": "Contest observer problem",
+            "time_limit": 1,
+            "memory_limit": 256,
+            "access_modifier": "public",
+        },
+        cookies=admin_cookies,
+    )
+    assert problem_response.status_code == 200, problem_response.text
+    problem_id = problem_response.json()["problem_id"]
+    invite_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/students",
+        json={"account_id": contestant_id},
+        cookies=admin_cookies,
+    )
+    assert invite_response.status_code == 200, invite_response.text
+    contest_response = client.post(
+        f"/admin/judge/academic-classes/{class_id}/contests/create",
+        json={
+            "contest_name": "Active contest for manager",
+            "start_time": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+            "end_time": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+            "problem_ids": [problem_id],
+        },
+        cookies=admin_cookies,
+    )
+    assert contest_response.status_code == 200, contest_response.text
+    contest_id = contest_response.json()["contest_id"]
+    source_code = "print('contest submission')"
+    with TestingSessionLocal() as db:
+        db.add(Language(language_id=97, name="Test language"))
+        db.add(
+            Submission(
+                problem_id=problem_id,
+                account_id=contestant_id,
+                language_id=97,
+                contest_id=contest_id,
+                class_id=class_id,
+                status="Accepted",
+                score=100,
+                passed_testcases=1,
+                total_testcases=1,
+                source_code=base64.b64encode(source_code.encode()).decode("ascii"),
+                source_code_encoded=True,
+            )
+        )
+        db.commit()
+
+    detail = client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}",
+        cookies=admin_cookies,
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["can_submit"] is False
+    assert detail.json()["can_view_all_submissions"] is True
+    assert detail.json()["problems"][0]["problem_name"] == "Contest observer problem"
+
+    standings = client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}/standings",
+        cookies=admin_cookies,
+    )
+    assert standings.status_code == 200, standings.text
+    assert len(standings.json()["standings"]) == 1
+    assert standings.json()["standings"][0]["account_name"] == "contest-view-contestant"
+    assert standings.json()["standings"][0]["score"] == 100
+    history = client.get(
+        f"/student/classes/{class_id}/submissions?contest_id={contest_id}",
+        cookies=admin_cookies,
+    )
+    assert history.status_code == 200, history.text
+    assert len(history.json()) == 1
+    assert history.json()[0]["account_name"] == "contest-view-contestant"
+    submission_id = history.json()[0]["submission_id"]
+    source = client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}/submissions/{submission_id}/source",
+        cookies=admin_cookies,
+    )
+    assert source.status_code == 200, source.text
+    assert source.json()["source_code"] == source_code
+
+    outsider_cookies = {"session_id": "contest-view-outsider-session"}
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}",
+        cookies=outsider_cookies,
+    ).status_code == 403
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}/standings",
+        cookies=outsider_cookies,
+    ).status_code == 403
+    assert client.get(
+        f"/student/classes/{class_id}/submissions?contest_id={contest_id}",
+        cookies=outsider_cookies,
+    ).status_code == 403
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}/submissions/{submission_id}/source",
+        cookies=outsider_cookies,
+    ).status_code == 403
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{contest_id}/submissions/{submission_id}/source",
+        cookies={"session_id": "contest-view-contestant-session"},
+    ).status_code == 403
 
 
 def test_students_request_class_access_and_owner_approves():
@@ -1550,7 +1784,7 @@ def test_enrolled_student_can_submit_source_code_for_class_problem(monkeypatch):
             "time_limit": 1,
             "memory_limit": 256,
             "testcases": [
-                {"input_data": "2 3\n", "expected_output": "5\n", "point": 100},
+                {"input_data": "2 3\n", "expected_output": "5\n", "point": 2},
             ],
         },
         cookies={"session_id": "submit-admin-session"},
@@ -1653,12 +1887,50 @@ def test_enrolled_student_can_submit_source_code_for_class_problem(monkeypatch):
         cookies={"session_id": "submit-admin-session"},
     )
     assert future_contest.status_code == 200, future_contest.text
+    future_contest_id = future_contest.json()["contest_id"]
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{future_contest_id}",
+        cookies={"session_id": "submit-student-session"},
+    ).status_code == 409
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{future_contest_id}/standings",
+        cookies={"session_id": "submit-student-session"},
+    ).status_code == 409
     assert client.post(
         submit_url,
         json={
             **submission_body,
-            "contest_id": future_contest.json()["contest_id"],
+            "contest_id": future_contest_id,
         },
+        cookies={"session_id": "submit-student-session"},
+    ).status_code == 409
+    assert client.get(
+        f"/student/classes/{class_id}/submissions?contest_id={future_contest_id}",
+        cookies={"session_id": "submit-student-session"},
+    ).status_code == 409
+
+    finished_contest = client.post(
+        f"/admin/judge/academic-classes/{class_id}/contests/create",
+        json={
+            "contest_name": "Finished contest",
+            "start_time": (now - timedelta(hours=2)).isoformat(),
+            "end_time": (now - timedelta(hours=1)).isoformat(),
+            "problem_ids": [problem_id],
+        },
+        cookies={"session_id": "submit-admin-session"},
+    )
+    assert finished_contest.status_code == 200, finished_contest.text
+    finished_contest_id = finished_contest.json()["contest_id"]
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{finished_contest_id}",
+        cookies={"session_id": "submit-student-session"},
+    ).status_code == 409
+    assert client.get(
+        f"/student/classes/{class_id}/contests/{finished_contest_id}/standings",
+        cookies={"session_id": "submit-student-session"},
+    ).status_code == 409
+    assert client.get(
+        f"/student/classes/{class_id}/submissions?contest_id={finished_contest_id}",
         cookies={"session_id": "submit-student-session"},
     ).status_code == 409
 
@@ -1669,7 +1941,7 @@ def test_enrolled_student_can_submit_source_code_for_class_problem(monkeypatch):
     )
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "Accepted"
-    assert response.json()["score"] == 100
+    assert response.json()["score"] == 2
     contest_detail = client.get(
         f"/student/classes/{class_id}/contests/{contest_id}",
         cookies={"session_id": "submit-student-session"},
@@ -1683,13 +1955,45 @@ def test_enrolled_student_can_submit_source_code_for_class_problem(monkeypatch):
     )
     assert standings.status_code == 200, standings.text
     assert standings.json()["standings"][0]["is_current_user"] is True
+    assert standings.json()["standings"][0]["score"] == 2
+    assert standings.json()["problems"] == [
+        {
+            "problem_id": problem_id,
+            "problem_order": 1,
+            "problem_name": "Add two numbers",
+            "max_score": 2,
+        }
+    ]
+    assert standings.json()["standings"][0]["problems"] == [
+        {
+            "problem_id": problem_id,
+            "problem_order": 1,
+            "problem_name": "Add two numbers",
+            "attempts": 1,
+            "solved": True,
+            "score": 2,
+            "max_score": 2,
+        }
+    ]
     history = client.get(
         f"/student/classes/{class_id}/submissions",
         cookies={"session_id": "submit-student-session"},
     )
     assert history.status_code == 200, history.text
-    assert history.json()[0]["contest_id"] == contest_id
-    assert "source_code" not in history.json()[0]
+    assert history.json() == []
+    contest_history = client.get(
+        f"/student/classes/{class_id}/submissions?contest_id={contest_id}",
+        cookies={"session_id": "submit-student-session"},
+    )
+    assert contest_history.status_code == 200, contest_history.text
+    assert len(contest_history.json()) == 1
+    assert contest_history.json()[0]["contest_id"] == contest_id
+    assert "source_code" not in contest_history.json()[0]
+    unrelated_contest_history = client.get(
+        f"/student/classes/{class_id}/submissions?contest_id={future_contest.json()['contest_id']}",
+        cookies={"session_id": "submit-student-session"},
+    )
+    assert unrelated_contest_history.status_code == 409
     assert client.get(
         "/student/languages",
         cookies={"session_id": "submit-student-session"},
@@ -1729,3 +2033,20 @@ def test_problem_and_contest_inputs_are_validated():
         cookies={"session_id": "validation-session"},
     )
     assert invalid_contest.status_code == 422
+    class_response = client.post(
+        "/admin/judge/academic-classes",
+        json={"class_name": "Invalid contest schedule"},
+        cookies={"session_id": "validation-session"},
+    )
+    assert class_response.status_code == 200, class_response.text
+    invalid_class_contest = client.post(
+        f"/admin/judge/academic-classes/{class_response.json()['class_id']}/contests/create",
+        json={
+            "contest_name": "Invalid class contest",
+            "start_time": "2026-10-01T12:00:00Z",
+            "end_time": "2026-10-01T10:00:00Z",
+            "problem_ids": [1],
+        },
+        cookies={"session_id": "validation-session"},
+    )
+    assert invalid_class_contest.status_code == 422
