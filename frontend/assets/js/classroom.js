@@ -12,6 +12,7 @@ const cancelCreateClassButton = document.getElementById("cancel-create-class");
 let currentAccount;
 let activeClassId;
 let managedClassId;
+let canCreateClassContest = false;
 let classListView = "my-classes";
 let contestProblemCatalog = [];
 let selectedContestProblemIds = [];
@@ -91,6 +92,50 @@ function renderContestProblemSelection() {
         ? `${selectedContestProblemIds.length}/${maxContestProblems} bài đã chọn. Thứ tự bên trên sẽ là số bài trong contest.`
         : "Chưa chọn bài tập nào.";
     submitButton.disabled = selectedContestProblemIds.length === 0;
+}
+
+function formatDateTimeLocal(value) {
+    const date = new Date(value);
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    return date.toISOString().slice(0, 16);
+}
+
+function resetContestForm() {
+    const form = document.getElementById("create-contest-form");
+    form.reset();
+    delete form.dataset.contestId;
+    form.hidden = !canCreateClassContest;
+    selectedContestProblemIds = [];
+    document.getElementById("contest-form-heading").textContent =
+        canCreateClassContest ? "Tạo cuộc thi" : "Quản lý cuộc thi";
+    document.getElementById("create-contest-button").textContent = "Tạo cuộc thi";
+    document.getElementById("cancel-contest-edit").hidden = true;
+    setMessage(document.getElementById("create-contest-message"), "");
+    renderContestProblemSelection();
+}
+
+function editContest(contest) {
+    const form = document.getElementById("create-contest-form");
+    form.hidden = false;
+    form.dataset.contestId = contest.contest_id;
+    form.elements.contest_name.value = contest.contest_name;
+    form.elements.description.value = contest.description || "";
+    form.elements.start_time.value = formatDateTimeLocal(contest.start_time);
+    form.elements.end_time.value = formatDateTimeLocal(contest.end_time);
+    selectedContestProblemIds = [...contest.problem_ids];
+    document.getElementById("contest-form-heading").textContent =
+        `Sửa cuộc thi: ${contest.contest_name}`;
+    document.getElementById("create-contest-button").textContent = "Lưu thay đổi";
+    document.getElementById("cancel-contest-edit").hidden = false;
+    setMessage(
+        document.getElementById("create-contest-message"),
+        "Có thể sửa cả thời gian và danh sách bài, kể cả khi contest đã có lịch sử nộp.",
+    );
+    renderContestProblemSelection();
+    document.getElementById("create-contest-form").scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+    });
 }
 
 function renderProblemMath(element) {
@@ -233,6 +278,9 @@ function showHome() {
 }
 
 async function openClass(classId, isStudent) {
+    if (document.getElementById("create-contest-form").dataset.contestId) {
+        resetContestForm();
+    }
     activeClassId = Number(classId);
     clearTimeout(managerSearchTimer);
     managerSearchRequest += 1;
@@ -286,10 +334,12 @@ async function openClass(classId, isStudent) {
         currentAccount.role === "SUPER_ADMIN" || data.is_owner
     );
     const canReviewJoinRequests = canManage && data.is_owner;
+    canCreateClassContest = canReviewJoinRequests;
     document.querySelectorAll(".admin-class-tools").forEach((tool) => {
         tool.hidden = !canManage;
     });
-    document.getElementById("create-contest-tools").hidden = !canReviewJoinRequests;
+    document.getElementById("create-contest-tools").hidden = !canManage;
+    document.getElementById("create-contest-form").hidden = !canCreateClassContest;
     document.getElementById("join-request-tools").hidden = !canReviewJoinRequests;
     document.getElementById("manager-tools").hidden = !canManagePermissions;
     document.getElementById("class-tab-history").hidden = canManage;
@@ -337,7 +387,7 @@ async function openClass(classId, isStudent) {
             <div class="member-item">
                 <div class="member-item-main">
                     <strong>${escapeHtml(member.account_name)}</strong>
-                    <small>${escapeHtml(member.account_email)}</small>
+                    ${member.account_email ? `<small>${escapeHtml(member.account_email)}</small>` : ""}
                 </div>
                 <div class="member-item-meta">
                     <span class="member-role ${roleClass}">${roleValue}</span>
@@ -368,11 +418,12 @@ async function openClass(classId, isStudent) {
         const isActive = contest.status === "active";
         const statusLabel = isActive ? "ĐANG DIỄN RA" : contest.status === "upcoming" ? "SẮP DIỄN RA" : "ĐÃ KẾT THÚC";
         const action = resolvedAsStudent
-            ? isActive
-                ? `<a class="button-link" href="contest.html?class_id=${encodeURIComponent(activeClassId)}&contest_id=${encodeURIComponent(contest.contest_id)}&from=${encodeURIComponent(classListView)}">Vào cuộc thi</a>`
+            ? contest.status !== "upcoming"
+                ? `<a class="button-link" href="contest.html?class_id=${encodeURIComponent(activeClassId)}&contest_id=${encodeURIComponent(contest.contest_id)}&from=${encodeURIComponent(classListView)}">${isActive ? "Vào cuộc thi" : "Xem kết quả"}</a>`
                 : `<button type="button" disabled>${statusLabel}</button>`
-            : canManage && isActive
-                ? `<a class="button-link secondary" href="contest.html?class_id=${encodeURIComponent(activeClassId)}&contest_id=${encodeURIComponent(contest.contest_id)}&from=${encodeURIComponent(classListView)}">Xem cuộc thi</a>`
+            : canManage
+                ? `<a class="button-link secondary" href="contest.html?class_id=${encodeURIComponent(activeClassId)}&contest_id=${encodeURIComponent(contest.contest_id)}&from=${encodeURIComponent(classListView)}">Xem cuộc thi</a>
+                   <button class="secondary" type="button" data-action="edit-contest" data-contest-id="${contest.contest_id}">Sửa</button>`
                 : "";
         return `
             <article class="problem-card">
@@ -388,9 +439,10 @@ async function openClass(classId, isStudent) {
         contestProblemCatalog = data.problems || [];
         selectedContestProblemIds = [];
         renderContestProblemSelection();
-        document.getElementById("create-contest-message").textContent = data.problems?.length
-            ? ""
-            : "Thêm ít nhất một bài tập vào lớp trước khi tạo cuộc thi.";
+        document.getElementById("create-contest-message").textContent =
+            canCreateClassContest && !data.problems?.length
+                ? "Thêm ít nhất một bài tập vào lớp trước khi tạo cuộc thi."
+                : "";
         if (canReviewJoinRequests) {
             await loadJoinRequests(activeClassId);
         }
@@ -711,6 +763,18 @@ document.body.addEventListener("click", async (event) => {
             case "switch-to-management":
                 await openClass(activeClassId, false);
                 break;
+            case "edit-contest": {
+                const contest = (await requestJson(
+                    `/admin/judge/academic-classes/${activeClassId}`,
+                )).contests.find(
+                    (item) => item.contest_id === Number(button.dataset.contestId),
+                );
+                if (!contest) {
+                    throw new Error("Không tìm thấy cuộc thi cần sửa.");
+                }
+                editContest(contest);
+                break;
+            }
             case "request-join":
                 await requestJson(`/student/classes/${classId}/join-requests`, { method: "POST" });
                 setMessage(pageMessage, "Đã gửi yêu cầu. Bạn có thể vào lớp sau khi chủ lớp duyệt.");
@@ -832,10 +896,13 @@ document.getElementById("create-contest-form").addEventListener("submit", async 
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
             throw new Error("Thời điểm kết thúc phải sau thời điểm bắt đầu.");
         }
+        const contestId = form.dataset.contestId;
         const contest = await requestJson(
-            `/admin/judge/academic-classes/${activeClassId}/contests/create`,
+            contestId
+                ? `/admin/judge/academic-classes/${activeClassId}/contests/${contestId}`
+                : `/admin/judge/academic-classes/${activeClassId}/contests/create`,
             {
-                method: "POST",
+                method: contestId ? "PATCH" : "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     contest_name: values.get("contest_name"),
@@ -846,11 +913,13 @@ document.getElementById("create-contest-form").addEventListener("submit", async 
                 }),
             },
         );
-        form.reset();
+        resetContestForm();
         await openClass(activeClassId, false);
         setMessage(
             document.getElementById("create-contest-message"),
-            `Đã tạo cuộc thi "${contest.contest_name}" với ${problemCount} bài.`,
+            contestId
+                ? `Đã cập nhật cuộc thi "${contest.contest_name}" với ${problemCount} bài.`
+                : `Đã tạo cuộc thi "${contest.contest_name}" với ${problemCount} bài.`,
         );
     } catch (error) {
         setMessage(document.getElementById("create-contest-message"), error.message, true);
@@ -858,6 +927,8 @@ document.getElementById("create-contest-form").addEventListener("submit", async 
         renderContestProblemSelection();
     }
 });
+
+document.getElementById("cancel-contest-edit").addEventListener("click", resetContestForm);
 
 const logoutButton = document.getElementById("logout-button");
 if (logoutButton) {

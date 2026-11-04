@@ -65,9 +65,23 @@ function renderCountdown() {
     if (!contestData || contestEnded) {
         return;
     }
-    const remaining = Date.parse(contestData.end_time) - (Date.now() + serverClockOffset);
+    const now = Date.now() + serverClockOffset;
+    const startTime = Date.parse(contestData.start_time);
+    const endTime = Date.parse(contestData.end_time);
+    const status = now < startTime ? "upcoming" : now <= endTime ? "active" : "finished";
+    document.getElementById("contest-status").textContent =
+        status === "upcoming" ? "SẮP DIỄN RA" : status === "active" ? "ĐANG DIỄN RA" : "ĐÃ KẾT THÚC";
+    document.getElementById("contest-countdown-label").textContent =
+        status === "upcoming" ? "Bắt đầu sau" : status === "active" ? "Còn lại" : "Đã kết thúc";
+    const remaining = (status === "upcoming" ? startTime : endTime) - now;
     if (remaining <= 0) {
-        finishContest("Cuộc thi đã kết thúc. Không thể tiếp tục nộp bài.");
+        if (status === "finished") {
+            finishContest(
+                contestData.can_submit
+                    ? "Cuộc thi đã kết thúc. Không thể tiếp tục nộp bài."
+                    : "",
+            );
+        }
         return;
     }
     const seconds = Math.floor(remaining / 1000);
@@ -282,8 +296,8 @@ async function initialize() {
         contestData = await requestJson(
             `/student/classes/${classId}/contests/${contestId}`,
         );
-        if (contestData.status !== "active") {
-            throw new Error("Chỉ có thể xem cuộc thi trong thời gian diễn ra.");
+        if (contestData.status === "upcoming" && !contestData.can_manage) {
+            throw new Error("Bạn chỉ có thể xem cuộc thi sau khi cuộc thi bắt đầu.");
         }
         document.querySelector(".contest-submit-panel").hidden = !contestData.can_submit;
         document.getElementById("contest-view-only-note").hidden = contestData.can_submit;
@@ -325,8 +339,10 @@ async function initialize() {
         );
         await fetchLatestHistory();
         renderCountdown();
-        countdownTimer = setInterval(renderCountdown, 1000);
-        pollTimer = setInterval(refreshLiveData, 5000);
+        if (contestData.status !== "finished") {
+            countdownTimer = setInterval(renderCountdown, 1000);
+            pollTimer = setInterval(refreshLiveData, 5000);
+        }
     } catch (error) {
         console.error(error);
         setMessage(pageMessage, error.message || "Không thể tải cuộc thi.", true);
